@@ -1,0 +1,146 @@
+body {
+  width: 390px; /* 350px에서 390px로 증가 (40px 추가) */
+  margin: 0;
+  padding: 0;
+  font-family: Arial, sans-serif;
+  background-color: #2d2d2d;
+  color: #fff;
+}
+
+.container {
+  padding: 10px 15px 15px 15px; /* 상단 10px, 우 15px, 하 15px, 좌 15px */
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 8px;
+  background-color: #3d3d3d;
+  border-radius: 4px;
+}
+
+.jenkins-logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: bold;
+  color: #fff;
+}
+
+.radio-group {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 10px;
+  background-color: #3d3d3d;
+  border-radius: 4px;
+}
+
+.radio-group label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.radio-group input[type="radio"] {
+  margin-right: 4px;
+  cursor: pointer;
+  accent-color: #4caf50; /* 선택된 라디오 버튼을 녹색으로 표시 */
+}
+
+.radio-group input[type="radio"]:checked + span {
+  color: #4caf50; /* 선택된 라디오 버튼의 텍스트도 녹색으로 */
+  font-weight: bold;
+}
+
+.button-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px; /* gap을 8px에서 6px로 줄여서 버튼이 더 넓어질 공간 확보 */
+}
+
+.action-btn {
+  padding: 8px 4px; /* padding을 12px 13px에서 8px 4px로 축소 */
+  background-color: #4a4a4a;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background-color 0.2s;
+  min-height: 44px; /* 최소 높이 고정 */
+  height: 44px; /* 높이 고정 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden; /* 넘치는 텍스트 숨김 */
+  line-height: 1.2; /* 줄 간격 조정 */
+  word-break: break-word; /* 긴 단어 줄바꿈 */
+}
+
+.action-btn:hover {
+  background-color: #5a5a5a;
+}
+
+.action-btn:active {
+  background-color: #3a3a3a;
+}
+
+.action-btn:disabled {
+  background-color: #2d2d2d;
+  color: #666;
+  cursor: not-allowed;
+  border-color: #444;
+}
+
+/* Menu 버튼 스타일 (올리브색) */
+.menu-btn {
+  background-color: #556b2f; /* darkolivegreen */
+  border-color: #6b8e23;
+}
+
+.menu-btn:hover {
+  background-color: #6b8e23; /* olivedrab */
+}
+
+.menu-btn:active {
+  background-color: #4a5a26;
+}
+
+/* Job 버튼 스타일 (steelblue색) */
+.job-btn {
+  background-color: #4682b4; /* steelblue */
+  border-color: #5f9ea0;
+}
+
+.job-btn:hover {
+  background-color: #5f9ea0; /* cadetblue */
+}
+
+.job-btn:active {
+  background-color: #36698c;
+}
+
+/* Custom 버튼 스타일 (darkcyan색) */
+.custom-btn {
+  background-color: #008b8b; /* darkcyan */
+  border-color: #00ced1;
+}
+
+.custom-btn:hover {
+  background-color: #00ced1; /* darkturquoise */
+}
+
+.custom-btn:active {
+  background-color: #007575;
+}
