@@ -1,0 +1,36 @@
+{
+  "sites": {
+    "V1": "http://vjenkins.lge.com/jenkins01",
+    "V2": "http://vjenkins.lge.com/jenkins02",
+    "V3": "http://vjenkins.lge.com/jenkins03",
+    "V4": "http://vjenkins.lge.com/jenkins04",
+    "L1": "http://lamp-ci.lge.com",
+    "E1": "http://10.218.144.200:8300",
+    "C1": "http://myjenkins.lge.com"
+  },
+  "menus": {
+    "node": "computer",
+    "trigger": "gerrit-trigger",
+    "manage-role": "role-strategy/manage-roles",
+    "assign-role": "role-strategy/assign-roles",
+    "credentials": "credentials",
+    "config": "configure",
+    "toolconfig": "configureTools",
+    "systemInfo": "systemInfo"
+  },
+  "job": {
+    "textlog": "lastBuild/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog",
+    "conslog": "lastBuild/consoleFull",
+    "env-var": "lastBuild/injectedEnvVars",
+    "rebuild": "lastBuild/rebuild/parameterized"
+  },
+  "custom": {
+    "vgit_na": "https://vgit.lge.com/na",
+    "vgit_eu": "https://vgit.lge.com/eu",
+    "vgit_as": "https://vgit.lge.com/as",
+    "collab": "https://collab.lge.com",
+    "jira": "https://jira.lge.com",
+    "custom": "http://your.custom.com"
+  }
+}
+
