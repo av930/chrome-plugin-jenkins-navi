@@ -6,9 +6,18 @@ let previousBuildUrl = ''; // ^http.*/job/.*/[0-9]+/ 패턴의 정확히 match�
 // Load configuration
 async function loadConfig() {
   try {
-    const response = await fetch('config.list');
-    config = await response.json();
-    console.log('Config loaded:', config);
+    // Try to load user config from storage first (as text to preserve order)
+    const result = await chrome.storage.local.get(['userConfigText']);
+
+    if (result.userConfigText) {
+      config = JSON.parse(result.userConfigText);
+      console.log('Config loaded from storage (user settings)');
+    } else {
+      // Fallback to config.list file
+      const response = await fetch('config.list');
+      config = await response.json();
+      console.log('Config loaded from config.list (default)');
+    }
 
     // 라디오 버튼 생성
     createRadioButtons();
@@ -19,11 +28,9 @@ async function loadConfig() {
     createCustomButtons();
 
   } catch (error) {
-    console.error('Failed to load config.list:', error);
+    console.error('Failed to load config:', error);
   }
-}
-
-// config.list의 sites로부터 라디오 버튼 생성
+}// config.list의 sites로부터 라디오 버튼 생성
 async function createRadioButtons() {
   const radioGroup = document.getElementById('radioGroup');
   radioGroup.innerHTML = ''; // 기존 내용 제거
