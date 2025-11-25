@@ -24,7 +24,7 @@ async function loadConfig() {
 }
 
 // config.list의 sites로부터 라디오 버튼 생성
-function createRadioButtons() {
+async function createRadioButtons() {
   const radioGroup = document.getElementById('radioGroup');
   radioGroup.innerHTML = ''; // 기존 내용 제거
 
@@ -33,6 +33,11 @@ function createRadioButtons() {
     console.error('Sites not found in config');
     return;
   }
+
+  // 저장된 site 불러오기
+  const result = await chrome.storage.local.get(['selectedSite']);
+  const savedSite = result.selectedSite;
+  console.log('Saved site:', savedSite);
 
   let isFirst = true;
   for (const [siteName, siteUrl] of Object.entries(sites)) {
@@ -44,8 +49,10 @@ function createRadioButtons() {
     input.name = 'server';
     input.value = siteName;
 
-    // 첫 번째 항목을 기본 선택
-    if (isFirst) {
+    // 저장된 site가 있으면 그것을 선택, 없으면 첫 번째 항목 선택
+    if (savedSite) {
+      input.checked = (siteName === savedSite);
+    } else if (isFirst) {
       input.checked = true;
       isFirst = false;
     }
@@ -259,6 +266,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('input[name="server"]').forEach(radio => {
       radio.addEventListener('change', () => {
         console.log('Server changed to:', radio.value);
+        // 선택한 site를 storage에 저장
+        chrome.storage.local.set({ selectedSite: radio.value }, () => {
+          console.log('Saved selected site:', radio.value);
+        });
       });
     });
   }, 100);
