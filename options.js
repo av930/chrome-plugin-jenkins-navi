@@ -1,12 +1,11 @@
 // Default config.list content
 const DEFAULT_CONFIG = {
   "sites": {
-    "V1": "http://vjenkins.lge.com/jenkins01",
-    "V2": "http://vjenkins.lge.com/jenkins02",
-    "V3": "http://vjenkins.lge.com/jenkins03",
-    "V4": "http://vjenkins.lge.com/jenkins04",
-    "L1": "http://lamp-ci.lge.com",
-    "E1": "http://10.218.144.200:8300",
+    "V1": "http://jenkins.rge.com/jenkins01",
+    "V2": "http://jenkins.rge.com/jenkins02",
+    "V3": "http://jenkins.rge.com/jenkins03",
+    "V4": "http://jenkins.rge.com/jenkins04",
+    "L1": "http://mysite.rge.com",
     "C1": "http://myjenkins.lge.com"
   },
   "menus": {
@@ -26,11 +25,11 @@ const DEFAULT_CONFIG = {
     "rebuild": "lastBuild/rebuild/parameterized"
   },
   "custom": {
-    "vgit_na": "https://vgit.lge.com/na",
-    "vgit_eu": "https://vgit.lge.com/eu",
-    "vgit_as": "https://vgit.lge.com/as",
-    "collab": "https://collab.lge.com",
-    "jira": "https://jira.lge.com",
+    "vgit_na": "https://git.rge.com/na",
+    "vgit_eu": "https://git.rge.com/eu",
+    "vgit_as": "https://git.rge.com/as",
+    "collab": "https://collab.rge.com",
+    "jira": "https://jira.rge.com",
     "custom": "http://your.custom.com"
   }
 };

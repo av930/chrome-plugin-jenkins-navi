@@ -137,7 +137,14 @@ function createCustomButtons() {
 
   for (const [customName, customUrl] of Object.entries(customMenus)) {
     const button = document.createElement('button');
-    button.className = 'action-btn custom-btn'; // custom-btn 클래스 추가
+
+    // URL에 'jenkins'가 포함되어 있으면 jenkins-btn 클래스 추가, 아니면 custom-btn
+    if (customUrl.toLowerCase().includes('jenkins')) {
+      button.className = 'action-btn jenkins-btn';
+    } else {
+      button.className = 'action-btn custom-btn';
+    }
+
     button.dataset.action = customName;
     button.dataset.url = customUrl;
     button.textContent = customName;
@@ -185,6 +192,31 @@ function handleMenuClick(menuName, menuPath) {
 // Handle custom button click (직접 URL로 이동)
 function handleCustomClick(customUrl) {
   console.log('Opening custom URL:', customUrl);
+
+  // URL에 'jenkins'가 포함되어 있으면 sites 항목과 비교하여 라디오 버튼 선택
+  if (customUrl.toLowerCase().includes('jenkins')) {
+    const sites = config.sites;
+    if (sites) {
+      // sites의 각 item을 순회하며 customUrl이 해당 siteUrl을 포함하는지 확인
+      for (const [siteName, siteUrl] of Object.entries(sites)) {
+        if (customUrl.includes(siteUrl)) {
+          // 해당 site의 라디오 버튼 선택
+          const radioButton = document.querySelector(`input[name="server"][value="${siteName}"]`);
+          if (radioButton) {
+            radioButton.checked = true;
+            console.log(`Auto-selected radio button: ${siteName} (matched with ${siteUrl})`);
+
+            // 선택한 site를 storage에 저장
+            chrome.storage.local.set({ selectedSite: siteName }, () => {
+              console.log('Saved selected site:', siteName);
+            });
+
+            break; // 첫 번째 매칭되는 항목만 선택
+          }
+        }
+      }
+    }
+  }
 
   // Open URL in current tab
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
