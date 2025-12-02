@@ -1,0 +1,10 @@
+{
+    "terminal.integrated.defaultProfile.windows": "Cygwin",
+    "terminal.integrated.profiles.windows": {
+        "Cygwin": {
+            "path": "D:\\.gradle\\OneDrive\\_MyProgram\\_Shell\\_Cygwin\\bin\\bash.exe",
+            "args": ["--login", "-i"],
+            "icon": "terminal-bash"
+        }
+    }
+}
