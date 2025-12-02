@@ -24,8 +24,8 @@
     "rebuild": "lastBuild/rebuild/parameterized"
   },
   "custom": {
-    "honda26my": "http://vjenkins.lge.com/jenkins06/job/honda_26my__ci_buildchecker_pipeline",
-    "connect_w": "http://vjenkins.lge.com/jenkins03/job/connectW_ci_ccc_Atriggerbuild",
+    "honda26my": "http://jenkins.rge.com/jenkins06/job/xxx",
+    "connect_w": "http://jenkins.rge.com/jenkins03/job/yyy",
     "git_na": "https://git.rge.com/na",
     "git_eu": "https://git.rge.com/eu",
     "git_as": "https://git.rge.com/as",

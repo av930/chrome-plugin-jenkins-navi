@@ -23,7 +23,7 @@ Jenkins 및 기타 도구로 빠르게 이동할 수 있는 Chrome Extension입�
 ```json
 {
   "V1": {
-    "base": "http://vjenkins.lge.com/jenkins01",
+    "base": "http://jenkins.rge.com/jenkins",
     "config": "configure",
     "node": "computer",
     ...

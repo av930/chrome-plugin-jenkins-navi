@@ -6,7 +6,7 @@ const DEFAULT_CONFIG = {
     "V3": "http://jenkins.rge.com/jenkins03",
     "V4": "http://jenkins.rge.com/jenkins04",
     "L1": "http://mysite.rge.com",
-    "C1": "http://myjenkins.lge.com"
+    "C1": "http://myjenkins.rge.com"
   },
   "menus": {
     "node": "computer",
