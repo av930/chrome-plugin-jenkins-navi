@@ -1,12 +1,11 @@
 // Default config.list content
 const DEFAULT_CONFIG = {
   "sites": {
-    "V1": "http://vjenkins.rge.com/jenkins01",
-    "V2": "http://vjenkins.rge.com/jenkins02",
-    "V3": "http://vjenkins.rge.com/jenkins03",
-    "V4": "http://vjenkins.rge.com/jenkins04",
-    "L1": "http://lamp-ci.rge.com",
-    "E1": "http://10.218.144.200:8300",
+    "V1": "http://jenkins.rge.com/jenkins01",
+    "V2": "http://jenkins.rge.com/jenkins02",
+    "V3": "http://jenkins.rge.com/jenkins03",
+    "V4": "http://jenkins.rge.com/jenkins04",
+    "L1": "http://mysite.rge.com",
     "C1": "http://myjenkins.rge.com"
   },
   "menus": {
@@ -26,9 +25,9 @@ const DEFAULT_CONFIG = {
     "rebuild": "lastBuild/rebuild/parameterized"
   },
   "custom": {
-    "vgit_na": "https://vgit.rge.com/na",
-    "vgit_eu": "https://vgit.rge.com/eu",
-    "vgit_as": "https://vgit.rge.com/as",
+    "vgit_na": "https://git.rge.com/na",
+    "vgit_eu": "https://git.rge.com/eu",
+    "vgit_as": "https://git.rge.com/as",
     "collab": "https://collab.rge.com",
     "jira": "https://jira.rge.com",
     "custom": "http://your.custom.com"

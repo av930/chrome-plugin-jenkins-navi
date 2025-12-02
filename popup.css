@@ -144,3 +144,20 @@ body {
 .custom-btn:active {
   background-color: #007575;
 }
+
+/* Jenkins URL이 포함된 Custom 버튼 스타일 (greenyellow색) */
+.jenkins-btn {
+  background-color: #adff2f; /* greenyellow */
+  border-color: #9acd32;
+  color: #2d2d2d; /* 밝은 배경에 어두운 텍스트 */
+}
+
+.jenkins-btn:hover {
+  background-color: #9acd32; /* yellowgreen */
+  color: #2d2d2d;
+}
+
+.jenkins-btn:active {
+  background-color: #8fbc28;
+  color: #2d2d2d;
+}
