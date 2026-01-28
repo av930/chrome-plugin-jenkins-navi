@@ -9,7 +9,7 @@
   },
   "menus": {
     "node": "computer",
-    "trigger": "gerrit-trigger",
+    "trigger": "gerrit_manual_trigger",
     "manage-role": "role-strategy/manage-roles",
     "assign-role": "role-strategy/assign-roles",
     "credentials": "credentials",
