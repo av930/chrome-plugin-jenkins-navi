@@ -3,6 +3,27 @@ let config = {};
 let previousJobUrl = ''; // ^http.*/job/.*/ 패턴과 정확히 match되는 이전 URL 저장
 let previousBuildUrl = ''; // ^http.*/job/.*/[0-9]+/ 패턴의 정확히 match되는 이전 URL 저장
 
+// Generate version string: v년도.날짜시간분 (분은 10분 단위)
+function generateVersion() {
+  const now = new Date();
+  const year = now.getFullYear().toString().slice(-2); // 년도 마지막 2자리
+  const month = (now.getMonth() + 1).toString(); // 월
+  const day = now.getDate().toString(); // 일
+  const hour = now.getHours().toString().padStart(2, '0'); // 시간 (2자리)
+  const minute = now.getMinutes(); // 10분 단위로 내림
+  const minuteStr = minute.toString().padStart(2, '0'); // 분 (2자리)
+
+  return `v${year}.${month}${day}${hour}${minuteStr}`;
+}
+
+// Display version info
+function displayVersion() {
+  const versionElement = document.getElementById('versionInfo');
+  if (versionElement) {
+    versionElement.textContent = generateVersion();
+  }
+}
+
 // Load configuration
 async function loadConfig() {
   try {
@@ -127,15 +148,19 @@ function createJobButtons() {
 
 // config.list의 custom으로부터 버튼 생성 (darkcyan색)
 function createCustomButtons() {
+  console.log('=== createCustomButtons START ===');
   const buttonGrid = document.getElementById('buttonGrid');
 
   const customMenus = config.custom;
+  console.log('Custom menus:', customMenus);
+
   if (!customMenus) {
     console.log('Custom menus not found in config');
     return;
   }
 
   for (const [customName, customUrl] of Object.entries(customMenus)) {
+    console.log(`Creating button: ${customName} -> ${customUrl}`);
     const button = document.createElement('button');
 
     // URL에 'jenkins'가 포함되어 있으면 jenkins-btn 클래스 추가, 아니면 custom-btn
@@ -150,11 +175,15 @@ function createCustomButtons() {
     button.textContent = customName;
 
     button.addEventListener('click', () => {
+      console.log(`Button clicked: ${customName}`);
       handleCustomClick(customUrl);
     });
 
     buttonGrid.appendChild(button);
+    console.log(`Button added: ${customName}`);
   }
+
+  console.log('=== createCustomButtons END ===');
 }
 
 // Get currently selected server
@@ -191,6 +220,7 @@ function handleMenuClick(menuName, menuPath) {
 
 // Handle custom button click (직접 URL로 이동)
 function handleCustomClick(customUrl) {
+  console.log('=== handleCustomClick START ===');
   console.log('Opening custom URL:', customUrl);
 
   // URL에 'jenkins'가 포함되어 있으면 sites 항목과 비교하여 라디오 버튼 선택
@@ -218,10 +248,56 @@ function handleCustomClick(customUrl) {
     }
   }
 
+  console.log('About to query tabs...');
+
   // Open URL in current tab
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    chrome.tabs.update(tabs[0].id, { url: customUrl });
+    console.log('=== Inside chrome.tabs.query callback ===');
+    console.log('Tabs:', tabs);
+
+    if (!tabs || tabs.length === 0) {
+      console.error('No active tab found!');
+      return;
+    }
+
+    const currentUrl = tabs[0].url;
+    let targetUrl = customUrl;
+
+    // URL 정규화 함수 (프로토콜과 끝 슬래시 제거)
+    const normalizeUrl = (url) => url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+
+    console.log('Current URL:', currentUrl);
+    console.log('Custom URL:', customUrl);
+    console.log('Normalized current:', normalizeUrl(currentUrl));
+    console.log('Normalized custom:', normalizeUrl(customUrl));
+
+    // 현재 URL과 customUrl이 같으면 (프로토콜, 슬래시 무시) job/.* 부분 제거
+    if (normalizeUrl(currentUrl) === normalizeUrl(customUrl)) {
+      console.log('URLs MATCH! Checking for job pattern...');
+      const jobMatch = customUrl.match(/^https?:\/\/(.*)\/job\/[^\/]+\/?$/);
+      console.log('Job match result:', jobMatch);
+
+      if (jobMatch) {
+        // 현재 URL의 프로토콜 사용
+        const protocol = currentUrl.match(/^https?:\/\//)[0];
+        targetUrl = protocol + jobMatch[1] + '/';
+        console.log('✓ Current URL matches custom URL, removed job/.*');
+        console.log('Target URL:', targetUrl);
+      } else {
+        console.log('✗ No job pattern found in customUrl');
+      }
+    } else {
+      console.log('✓ URLs do not match, navigating to custom URL');
+    }
+
+    console.log('Final target URL:', targetUrl);
+    console.log('Updating tab...');
+    chrome.tabs.update(tabs[0].id, { url: targetUrl }, () => {
+      console.log('Tab updated successfully');
+    });
   });
+
+  console.log('=== handleCustomClick END ===');
 }
 
 // Handle job button click (현재 URL 분석 후 경로 추가)
@@ -298,6 +374,7 @@ function handleJobClick(jobPath) {
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
+  displayVersion();
   await loadConfig();
 
   // 라디오 버튼 변경 이벤트 리스너는 동적으로 생성된 후에 추가
