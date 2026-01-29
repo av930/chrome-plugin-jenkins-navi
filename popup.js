@@ -51,7 +51,9 @@ async function loadConfig() {
   } catch (error) {
     console.error('Failed to load config:', error);
   }
-}// config.list의 sites로부터 라디오 버튼 생성
+}
+
+// config.list의 sites로부터 라디오 버튼 생성
 async function createRadioButtons() {
   const radioGroup = document.getElementById('radioGroup');
   radioGroup.innerHTML = ''; // 기존 내용 제거
@@ -106,18 +108,50 @@ function createMenuButtons() {
     return;
   }
 
+  // 메뉴 버튼 먼저 생성
+  const menuButtons = [];
   for (const [menuName, menuPath] of Object.entries(menus)) {
     const button = document.createElement('button');
-    button.className = 'action-btn menu-btn'; // menu-btn 클래스 추가
+    button.className = 'action-btn menu-btn';
     button.dataset.action = menuName;
     button.dataset.path = menuPath;
     button.textContent = menuName;
-
     button.addEventListener('click', () => {
       handleMenuClick(menuName, menuPath);
     });
-
-    buttonGrid.appendChild(button);
+    menuButtons.push(button);
+  }
+  // run 버튼 별도 행으로 생성
+  let runButtons = [];
+  if (config.run) {
+    for (const [runName, runPath] of Object.entries(config.run)) {
+      const button = document.createElement('button');
+      button.className = 'action-btn run-btn';
+      button.dataset.action = runName;
+      button.dataset.path = runPath;
+      const icon = document.createElement('img');
+      icon.src = 'play.svg';
+      icon.alt = 'Run';
+      icon.className = 'play-icon';
+      const span = document.createElement('span');
+      span.textContent = runName;
+      span.className = 'run-btn-label';
+      button.appendChild(icon);
+      button.appendChild(span);
+      button.addEventListener('click', () => {
+        handleRunClick(runPath, runName);
+      });
+      runButtons.push(button);
+    }
+  }
+  // 메뉴 버튼 먼저 추가
+  menuButtons.forEach(btn => buttonGrid.appendChild(btn));
+  // run 버튼이 있으면 줄바꿈(div) 후 한 줄에 4개씩 grid로 추가
+  if (runButtons.length > 0) {
+    const runRow = document.createElement('div');
+    runRow.className = 'run-row';
+    runButtons.forEach(btn => runRow.appendChild(btn));
+    buttonGrid.appendChild(runRow);
   }
 }
 
@@ -215,6 +249,26 @@ function handleMenuClick(menuName, menuPath) {
   // Open URL in current tab
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     chrome.tabs.update(tabs[0].id, { url: url });
+  });
+}
+
+// Handle run button click (파라미터 입력 다이얼로그 열기)
+async function handleRunClick(runUrl, buttonName) {
+  console.log('Opening run dialog for URL:', runUrl);
+
+  // URL을 인코딩하여 run_dialog.html에 전달
+  const encodedUrl = encodeURIComponent(runUrl);
+  const encodedButton = encodeURIComponent(buttonName);
+  const dialogUrl = `run_dialog.html?url=${encodedUrl}&button=${encodedButton}`;
+
+  // 다이얼로그 창 열기
+  chrome.windows.create({
+    url: dialogUrl,
+    type: 'popup',
+    width: 550,
+    height: 380,
+    left: 300,
+    top: 200
   });
 }
 

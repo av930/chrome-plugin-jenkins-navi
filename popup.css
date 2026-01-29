@@ -1,10 +1,57 @@
+/* 팝업 스타일 */
+.popup-window {
+  background: #222;
+  border-radius: 10px;
+  width: 100%;
+  min-width: 350px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+/* Run 버튼용 play 아이콘 스타일 */
+.run-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: sienna !important;
+  border-color: #a0522d !important;
+  color: #fff !important;
+  position: relative;
+  padding: 8px 4px;
+}
+.run-btn:hover {
+  background-color: #c86e3f !important;
+}
+.run-btn:active {
+  background-color: #8b4513 !important;
+}
+.play-icon {
+  width: 14px;
+  height: 14px;
+  position: absolute;
+  top: 4px;
+  left: 4px;
+}
+.run-btn-label {
+  font-weight: bold;
+  font-size: 12px;
+  color: #fff;
+}
+html {
+  width: 390px;
+  height: auto;
+}
+
 body {
   width: 390px; /* 350px에서 390px로 증가 (40px 추가) */
+  height: auto;
   margin: 0;
   padding: 0;
   font-family: Arial, sans-serif;
   background-color: #2d2d2d;
   color: #fff;
+  overflow-x: hidden;
 }
 
 .container {
@@ -72,10 +119,19 @@ body {
   font-weight: bold;
 }
 
+/* 메뉴/잡/커스텀 버튼은 grid, run-row는 별도 flex row */
 .button-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 6px; /* gap을 8px에서 6px로 줄여서 버튼이 더 넓어질 공간 확보 */
+  gap: 6px;
+}
+.run-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 6px;
+  margin-bottom: 2px;
 }
 
 .action-btn {
