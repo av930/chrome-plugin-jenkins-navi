@@ -135,8 +135,7 @@ function createMenuButtons() {
     return;
   }
 
-  // 메뉴 버튼 먼저 생성
-  const menuButtons = [];
+  // 메뉴 버튼 생성
   for (const [menuName, menuPath] of Object.entries(menus)) {
     const button = document.createElement('button');
     button.className = 'action-btn menu-btn';
@@ -146,39 +145,22 @@ function createMenuButtons() {
     button.addEventListener('click', () => {
       handleMenuClick(menuName, menuPath);
     });
-    menuButtons.push(button);
+    buttonGrid.appendChild(button);
   }
-  // run 버튼 별도 행으로 생성
-  let runButtons = [];
+
+  // run 버튼 생성 (menu 버튼 다음에 개별적으로 추가)
   if (config.run) {
     for (const [runName, runPath] of Object.entries(config.run)) {
       const button = document.createElement('button');
       button.className = 'action-btn run-btn';
       button.dataset.action = runName;
       button.dataset.path = runPath;
-      const icon = document.createElement('img');
-      icon.src = 'play.svg';
-      icon.alt = 'Run';
-      icon.className = 'play-icon';
-      const span = document.createElement('span');
-      span.textContent = runName;
-      span.className = 'run-btn-label';
-      button.appendChild(icon);
-      button.appendChild(span);
+      button.textContent = '▶ ' + runName;
       button.addEventListener('click', () => {
         handleRunClick(runPath, runName);
       });
-      runButtons.push(button);
+      buttonGrid.appendChild(button);
     }
-  }
-  // 메뉴 버튼 먼저 추가
-  menuButtons.forEach(btn => buttonGrid.appendChild(btn));
-  // run 버튼이 있으면 줄바꿈(div) 후 한 줄에 4개씩 grid로 추가
-  if (runButtons.length > 0) {
-    const runRow = document.createElement('div');
-    runRow.className = 'run-row';
-    runButtons.forEach(btn => runRow.appendChild(btn));
-    buttonGrid.appendChild(runRow);
   }
 }
 

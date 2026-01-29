@@ -19,7 +19,8 @@
   },
     "run": {
     "remove-his": "http://vjenkins.lge.com/jenkins03/job/_SFolder_CommonUtility/job/ControlJenkins/buildWithParameters?token=plugin",
-    "copy_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin"
+    "copy_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin",
+    "temp_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin"
   },
   "job": {
     "textlog": "lastBuild/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog",

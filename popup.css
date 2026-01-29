@@ -9,16 +9,12 @@
   flex-direction: column;
   align-items: stretch;
 }
-/* Run 버튼용 play 아이콘 스타일 */
+
+/* Run 버튼 스타일 */
 .run-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   background-color: sienna !important;
   border-color: #a0522d !important;
   color: #fff !important;
-  position: relative;
-  padding: 8px 4px;
 }
 .run-btn:hover {
   background-color: #c86e3f !important;
@@ -26,18 +22,7 @@
 .run-btn:active {
   background-color: #8b4513 !important;
 }
-.play-icon {
-  width: 14px;
-  height: 14px;
-  position: absolute;
-  top: 4px;
-  left: 4px;
-}
-.run-btn-label {
-  font-weight: bold;
-  font-size: 12px;
-  color: #fff;
-}
+
 html {
   width: 390px;
   height: auto;
@@ -119,19 +104,11 @@ body {
   font-weight: bold;
 }
 
-/* 메뉴/잡/커스텀 버튼은 grid, run-row는 별도 flex row */
+/* 버튼 그리드 레이아웃 */
 .button-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 6px;
-}
-.run-row {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-  margin-top: 6px;
-  margin-bottom: 2px;
 }
 
 .action-btn {
