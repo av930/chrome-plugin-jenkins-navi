@@ -35,9 +35,31 @@ async function loadConfig() {
       console.log('Config loaded from storage (user settings)');
     } else {
       // Fallback to config.list file
-      const response = await fetch('config.list');
-      config = await response.json();
-      console.log('Config loaded from config.list (default)');
+      try {
+        const response = await fetch('config.list');
+        if (!response.ok) {
+          throw new Error('config.list not found');
+        }
+        const text = await response.text();
+
+        // Check if config.list is empty or invalid
+        if (!text || text.trim() === '') {
+          throw new Error('config.list is empty');
+        }
+
+        config = JSON.parse(text);
+        console.log('Config loaded from config.list');
+      } catch (configError) {
+        // If config.list doesn't exist or is empty, copy from config.default
+        console.log('config.list not found or empty, loading config.default:', configError.message);
+        const defaultResponse = await fetch('config.default');
+        const defaultText = await defaultResponse.text();
+        config = JSON.parse(defaultText);
+
+        // Save the default config as config.list in storage
+        await chrome.storage.local.set({ userConfigText: defaultText });
+        console.log('Config loaded from config.default and saved to storage');
+      }
     }
 
     // 라디오 버튼 생성
