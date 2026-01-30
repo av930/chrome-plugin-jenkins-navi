@@ -9,18 +9,13 @@
   },
   "menus": {
     "node": "computer",
-    "trigger": "gerrit_manual_trigger",
+    "sys-trigger": "gerrit_manual_trigger",
     "manage-role": "role-strategy/manage-roles",
     "assign-role": "role-strategy/assign-roles",
     "credentials": "credentials",
     "config": "configure",
     "toolconfig": "configureTools",
     "systemInfo": "systemInfo"
-  },
-    "run": {
-    "remove-his": "http://vjenkins.lge.com/jenkins03/job/_SFolder_CommonUtility/job/ControlJenkins/buildWithParameters?token=plugin",
-    "copy_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin",
-    "temp_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin"
   },
   "job": {
     "textlog": "lastBuild/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog",
@@ -37,6 +32,10 @@
     "collab": "https://collab.rge.com",
     "jira": "https://jira.rge.com",
     "custom": "http://your.custom.com"
+  },
+  "run": {
+    "rm-history": "http://vjenkins.lge.com/jenkins03/job/_SFolder_CommonUtility/job/ControlJenkins/buildWithParameters?token=plugin",
+    "retrigger": "http://vjenkins.lge.com/jenkins03/job/Common_retriggerJOB/buildWithParameters?token=plugin"
+    "temp_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin"
   }
 }
-
