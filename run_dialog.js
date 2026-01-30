@@ -540,18 +540,29 @@ async function initializeRunDialog() {
     // Save parameters before executing
     await saveParameters(paramsText);
 
-    // Open URL directly in a background tab
+    // Get current popup window ID
+    const currentWindow = await chrome.windows.getCurrent();
+    const popupWindowId = currentWindow.id;
+    console.log('Current popup window ID:', popupWindowId);
+
+    // Create new tab with URL (active: true to make it visible)
     console.log('Creating tab with URL:', finalUrl);
 
     try {
-      const tab = await chrome.tabs.create({ url: finalUrl, active: false });
+      const tab = await chrome.tabs.create({ url: finalUrl, active: true });
       console.log('Tab created successfully:', tab.id, 'URL:', finalUrl);
 
-      // Close this popup window after 1 second
+      // Close this popup window after 2 seconds
       setTimeout(() => {
-        console.log('Closing window after 1 second delay');
-        window.close();
-      }, 1000);
+        console.log('Closing popup window after 2 second delay');
+        chrome.windows.remove(popupWindowId, () => {
+          if (chrome.runtime.lastError) {
+            console.error('Failed to close window:', chrome.runtime.lastError);
+          } else {
+            console.log('Popup window closed successfully');
+          }
+        });
+      }, 2000);
     } catch (error) {
       console.error('Failed to create tab:', error);
       alert('Failed to create tab: ' + error.message);
