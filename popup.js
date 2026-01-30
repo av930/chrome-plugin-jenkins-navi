@@ -43,13 +43,74 @@ async function loadConfig() {
     // 라디오 버튼 생성
     createRadioButtons();
 
-    // 메뉴 버튼 생성 (menus + job + custom)
-    createMenuButtons();
-    createJobButtons();
-    createCustomButtons();
+    // config.list의 순서대로 버튼 생성 (sites 제외)
+    createButtonsInOrder();
 
   } catch (error) {
     console.error('Failed to load config:', error);
+  }
+}
+
+// config.list의 순서대로 버튼 생성
+function createButtonsInOrder() {
+  const buttonGrid = document.getElementById('buttonGrid');
+  if (!buttonGrid) return;
+
+  buttonGrid.innerHTML = ''; // 기존 내용 제거
+
+  // config 객체를 순회하면서 sites를 제외한 항목들을 순서대로 처리
+  for (const [sectionName, sectionData] of Object.entries(config)) {
+    if (sectionName === 'sites') continue; // sites는 이미 라디오 버튼으로 처리됨
+
+    console.log(`Creating buttons for section: ${sectionName}`);
+
+    if (sectionName === 'menus') {
+      createSectionButtons(sectionData, 'menu-btn', (menuName, menuPath) => {
+        handleMenuClick(menuName, menuPath);
+      });
+    } else if (sectionName === 'run') {
+      createSectionButtons(sectionData, 'run-btn', (runName, runPath) => {
+        handleRunClick(runPath, runName);
+      }, '▶ ');
+    } else if (sectionName === 'job') {
+      createSectionButtons(sectionData, 'job-btn', (jobName, jobPath) => {
+        handleJobClick(jobPath);
+      });
+    } else if (sectionName === 'custom') {
+      // custom은 URL에 따라 클래스가 다름
+      for (const [customName, customUrl] of Object.entries(sectionData)) {
+        const button = document.createElement('button');
+        if (customUrl.toLowerCase().includes('jenkins')) {
+          button.className = 'action-btn jenkins-btn';
+        } else {
+          button.className = 'action-btn custom-btn';
+        }
+        button.dataset.action = customName;
+        button.dataset.url = customUrl;
+        button.textContent = customName;
+        button.addEventListener('click', () => {
+          handleCustomClick(customUrl);
+        });
+        buttonGrid.appendChild(button);
+      }
+    }
+  }
+}
+
+// 섹션별 버튼 생성 헬퍼 함수
+function createSectionButtons(sectionData, className, clickHandler, prefix = '') {
+  const buttonGrid = document.getElementById('buttonGrid');
+
+  for (const [name, path] of Object.entries(sectionData)) {
+    const button = document.createElement('button');
+    button.className = `action-btn ${className}`;
+    button.dataset.action = name;
+    button.dataset.path = path;
+    button.textContent = prefix + name;
+    button.addEventListener('click', () => {
+      clickHandler(name, path);
+    });
+    buttonGrid.appendChild(button);
   }
 }
 
@@ -95,111 +156,6 @@ async function createRadioButtons() {
 
     radioGroup.appendChild(label);
   }
-}
-
-// config.list의 menus로부터 버튼 생성 (올리브색)
-function createMenuButtons() {
-  const buttonGrid = document.getElementById('buttonGrid');
-  buttonGrid.innerHTML = ''; // 기존 내용 제거
-
-  const menus = config.menus;
-  if (!menus) {
-    console.error('Menus not found in config');
-    return;
-  }
-
-  // 메뉴 버튼 생성
-  for (const [menuName, menuPath] of Object.entries(menus)) {
-    const button = document.createElement('button');
-    button.className = 'action-btn menu-btn';
-    button.dataset.action = menuName;
-    button.dataset.path = menuPath;
-    button.textContent = menuName;
-    button.addEventListener('click', () => {
-      handleMenuClick(menuName, menuPath);
-    });
-    buttonGrid.appendChild(button);
-  }
-
-  // run 버튼 생성 (menu 버튼 다음에 개별적으로 추가)
-  if (config.run) {
-    for (const [runName, runPath] of Object.entries(config.run)) {
-      const button = document.createElement('button');
-      button.className = 'action-btn run-btn';
-      button.dataset.action = runName;
-      button.dataset.path = runPath;
-      button.textContent = '▶ ' + runName;
-      button.addEventListener('click', () => {
-        handleRunClick(runPath, runName);
-      });
-      buttonGrid.appendChild(button);
-    }
-  }
-}
-
-// config.list의 job으로부터 버튼 생성 (steelblue색)
-function createJobButtons() {
-  const buttonGrid = document.getElementById('buttonGrid');
-
-  const jobMenus = config.job;
-  if (!jobMenus) {
-    console.log('Job menus not found in config');
-    return;
-  }
-
-  for (const [jobName, jobPath] of Object.entries(jobMenus)) {
-    const button = document.createElement('button');
-    button.className = 'action-btn job-btn'; // job-btn 클래스 추가
-    button.dataset.action = jobName;
-    button.dataset.path = jobPath;
-    button.textContent = jobName;
-
-    button.addEventListener('click', () => {
-      handleJobClick(jobPath);
-    });
-
-    buttonGrid.appendChild(button);
-  }
-}
-
-// config.list의 custom으로부터 버튼 생성 (darkcyan색)
-function createCustomButtons() {
-  console.log('=== createCustomButtons START ===');
-  const buttonGrid = document.getElementById('buttonGrid');
-
-  const customMenus = config.custom;
-  console.log('Custom menus:', customMenus);
-
-  if (!customMenus) {
-    console.log('Custom menus not found in config');
-    return;
-  }
-
-  for (const [customName, customUrl] of Object.entries(customMenus)) {
-    console.log(`Creating button: ${customName} -> ${customUrl}`);
-    const button = document.createElement('button');
-
-    // URL에 'jenkins'가 포함되어 있으면 jenkins-btn 클래스 추가, 아니면 custom-btn
-    if (customUrl.toLowerCase().includes('jenkins')) {
-      button.className = 'action-btn jenkins-btn';
-    } else {
-      button.className = 'action-btn custom-btn';
-    }
-
-    button.dataset.action = customName;
-    button.dataset.url = customUrl;
-    button.textContent = customName;
-
-    button.addEventListener('click', () => {
-      console.log(`Button clicked: ${customName}`);
-      handleCustomClick(customUrl);
-    });
-
-    buttonGrid.appendChild(button);
-    console.log(`Button added: ${customName}`);
-  }
-
-  console.log('=== createCustomButtons END ===');
 }
 
 // Get currently selected server
