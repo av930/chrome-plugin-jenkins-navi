@@ -214,19 +214,22 @@ function handleMenuClick(menuName, menuPath) {
 
 // Handle run button click (파라미터 입력 다이얼로그 열기)
 async function handleRunClick(runUrl, buttonName) {
-  console.log('Opening run dialog for URL:', runUrl);
+  // Get current page URL before opening dialog
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const currentPageUrl = tabs && tabs.length > 0 ? tabs[0].url : '';
 
-  // URL을 인코딩하여 run_dialog.html에 전달
+  // Encode parameters for URL
   const encodedUrl = encodeURIComponent(runUrl);
   const encodedButton = encodeURIComponent(buttonName);
-  const dialogUrl = `run_dialog.html?url=${encodedUrl}&button=${encodedButton}`;
+  const encodedPageUrl = encodeURIComponent(currentPageUrl);
+  const dialogUrl = `run_dialog.html?url=${encodedUrl}&button=${encodedButton}&pageUrl=${encodedPageUrl}`;
 
-  // 다이얼로그 창 열기
+  // Open dialog window
   chrome.windows.create({
     url: dialogUrl,
     type: 'popup',
-    width: 550,
-    height: 380,
+    width: 1040,
+    height: 450,
     left: 300,
     top: 200
   });
