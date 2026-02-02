@@ -14,6 +14,7 @@ PARAM2=0-11`;
 const urlParams = new URLSearchParams(window.location.search);
 let baseUrl = decodeURIComponent(urlParams.get('url') || '');
 const runButton = urlParams.get('button'); // run button name (e.g., 'remove-his', 'copy_job')
+const pageUrl = urlParams.get('pageUrl') || ''; // Current page URL before opening dialog (keep encoded)
 const isRunDialogMode = !!baseUrl; // Run dialog mode if URL parameter exists
 
 // Convert https to http (force http)
@@ -57,10 +58,15 @@ async function loadConfig() {
       config = JSON.parse(result.userConfigText);
       console.log('Config loaded from storage (user settings)');
     } else {
-      // Fallback to config.list file
-      const response = await fetch('config.list');
-      config = await response.json();
-      console.log('Config loaded from config.list (default)');
+      // Fallback to config.default file
+      console.log('userConfigText not found in storage, loading config.default');
+      const defaultResponse = await fetch('config.default');
+      const defaultText = await defaultResponse.text();
+      config = JSON.parse(defaultText);
+
+      // Save the default config as userConfigText in storage
+      await chrome.storage.local.set({ userConfigText: defaultText });
+      console.log('Config loaded from config.default and saved to storage as userConfigText');
     }
 
     // 라디오 버튼 생성
@@ -222,24 +228,26 @@ function handleMenuClick(menuName, menuPath) {
 
 // Handle run button click (파라미터 입력 다이얼로그 열기)
 async function handleRunClick(runUrl, buttonName) {
-  console.log('Opening run dialog for URL:', runUrl);
+  // Get current page URL before opening dialog
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const currentPageUrl = tabs && tabs.length > 0 ? tabs[0].url : '';
 
-  // URL을 인코딩하여 run_dialog.html에 전달
+  // Encode parameters for URL
   const encodedUrl = encodeURIComponent(runUrl);
   const encodedButton = encodeURIComponent(buttonName);
-  const dialogUrl = `run_dialog.html?url=${encodedUrl}&button=${encodedButton}`;
+  const encodedPageUrl = encodeURIComponent(currentPageUrl);
+  const dialogUrl = `run_dialog.html?url=${encodedUrl}&button=${encodedButton}&pageUrl=${encodedPageUrl}`;
 
-  // 다이얼로그 창 열기
+  // Open dialog window
   chrome.windows.create({
     url: dialogUrl,
     type: 'popup',
-    width: 550,
-    height: 380,
+    width: 1040,
+    height: 450,
     left: 300,
     top: 200
   });
 
-  // Close current popup
   window.close();
 }
 
@@ -439,11 +447,32 @@ async function saveParameters(params) {
 
 // Initialize run dialog
 async function initializeRunDialog() {
+  const previousTextarea = document.getElementById('previousParams');
   const textarea = document.getElementById('paramsInput');
 
   // Load saved parameters
   const savedParams = await loadParameters();
-  textarea.value = savedParams;
+  previousTextarea.value = savedParams;
+
+  // Check if current page URL matches any configured site and update PARAM1
+  let updatedParams = savedParams;
+  if (pageUrl && config.sites) {
+    const normalizeUrl = (url) => url.replace(/^https?:\/\//, '');
+    const normalizedCurrentUrl = normalizeUrl(pageUrl);
+
+    // Find matching site
+    const matchedSite = Object.entries(config.sites).find(([_, siteUrl]) =>
+      normalizedCurrentUrl.includes(normalizeUrl(siteUrl))
+    );
+
+    if (matchedSite) {
+      updatedParams = savedParams.replace(/^(PARAM1=)(.*)$/m, `$1${pageUrl}`);
+      console.log(`PARAM1 updated with current page URL (matched site: ${matchedSite[0]})`);
+    }
+  }
+
+  // Display in Enter Parameters
+  textarea.value = updatedParams;
   textarea.focus();
 
   // Run button click handler
@@ -542,6 +571,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.body.classList.add('run-dialog-mode');
     document.getElementById('runDialogContent').style.display = 'flex';
     document.querySelector('.popup-window').style.display = 'none';
+
+    // Load config for sites information
+    await loadConfig();
+
     await initializeRunDialog();
   } else {
     // Popup Mode

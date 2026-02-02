@@ -7,8 +7,8 @@
   <style>
     /* Run Dialog specific styles */
     body.run-dialog-mode {
-      width: 500px;
-      height: 300px;
+      width: 1040px;
+      height: 450px;
       margin: 0;
       padding: 0;
       overflow: hidden;
@@ -18,32 +18,40 @@
       display: flex;
       flex-direction: column;
       width: 100%;
-      height: 100%;
+      height: auto;
       box-sizing: border-box;
+      padding: 0 20px;
     }
 
     #runDialogContent h3 {
       margin: 0;
-      padding: 15px 15px 10px 15px;
+      padding: 15px 0 10px 0;
       color: #fff;
       font-size: 16px;
       flex-shrink: 0;
     }
 
     #runDialogContent textarea {
-      flex: 1;
-      width: calc(100% - 30px);
+      width: 1000px;
       padding: 8px;
-      margin: 0 15px;
+      margin: 0 0 10px 0;
       font-family: 'Consolas', 'Courier New', monospace;
       font-size: 13px;
+      line-height: 1.5;
       background-color: #1e1e1e;
       color: #d4d4d4;
       border: 1px solid #555;
       border-radius: 4px;
-      resize: none;
+      resize: vertical;
       box-sizing: border-box;
-      min-height: 0;
+      min-height: calc(1.5em * 5 + 16px);
+      height: calc(1.5em * 5 + 16px);
+    }
+
+    #runDialogContent #previousParams {
+      background-color: #2d2d30;
+      color: #858585;
+      cursor: not-allowed;
     }
 
     #runDialogContent textarea:focus {
@@ -54,7 +62,7 @@
     #runDialogContent .button-container {
       display: flex;
       gap: 10px;
-      padding: 10px 15px 15px 15px;
+      padding: 10px 0 15px 0;
       justify-content: flex-end;
       flex-shrink: 0;
     }
@@ -99,6 +107,8 @@
 <body>
   <!-- Run Dialog Content (shown when URL param exists) -->
   <div id="runDialogContent" style="display: none;">
+    <h3>Previous Parameters</h3>
+    <textarea id="previousParams" readonly></textarea>
     <h3>Enter Parameters</h3>
     <textarea id="paramsInput"></textarea>
     <div class="button-container">
