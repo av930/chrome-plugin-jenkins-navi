@@ -219,11 +219,6 @@ function handleMenuClick(menuName, menuPath) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     chrome.tabs.update(tabs[0].id, { url: url });
   });
-
-  // Close popup after 2 seconds
-  setTimeout(() => {
-    window.close();
-  }, 2000);
 }
 
 // Handle run button click (파라미터 입력 다이얼로그 열기)
@@ -330,11 +325,6 @@ function handleCustomClick(customUrl) {
     });
   });
 
-  // Close popup after 2 seconds
-  setTimeout(() => {
-    window.close();
-  }, 2000);
-
   console.log('=== handleCustomClick END ===');
 }
 
@@ -408,11 +398,6 @@ function handleJobClick(jobPath) {
     console.log('Opening new URL:', newUrl);
     chrome.tabs.update(tabs[0].id, { url: newUrl });
   });
-
-  // Close popup after 2 seconds
-  setTimeout(() => {
-    window.close();
-  }, 2000);
 }
 
 // ========== Run Dialog Functions ==========
