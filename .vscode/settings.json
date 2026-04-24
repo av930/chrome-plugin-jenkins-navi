@@ -6,5 +6,6 @@
             "args": ["--login", "-i"],
             "icon": "terminal-bash"
         }
-    }
+    },
+    "git.sshCommand": "ssh -i D:/.gradle/OneDrive/_MyProgram/HOME/.ssh/id_ed25519.github -o IdentitiesOnly=yes"
 }

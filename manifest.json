@@ -5,6 +5,7 @@
   "description": "Quick navigation to Jenkins and other tools",
   "action": {
     "default_popup": "run_dialog.html",
+    "default_title": "Jenkins Navigator",
     "default_icon": {
       "16": "icon16.png",
       "48": "icon48.png",
