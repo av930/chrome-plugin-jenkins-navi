@@ -14,6 +14,7 @@
     job: [
       { key: 'B', text: ['Build with Parameters', 'Build Now', '빌드 실행'], selector: '#side-panel a[href*="build?"], .task a[href*="build?"]' },
       { key: 'C', text: ['구성', 'Configure'], selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"]' },
+      { key: 'E', text: ['Rebuild Last'], selector: '#side-panel a[href*="rebuild"], .task a[href*="rebuild"]' },
       { key: 'H', text: ['Job Config History'], selector: '#side-panel a[href*="jobConfigHistory"], .task a[href*="jobConfigHistory"]' },
       { key: 'R', text: ['이름 바꾸기', 'Rename'], selector: '#side-panel a[href$="/confirm-rename"], .task a[href$="/confirm-rename"]' }
     ],
