@@ -12,19 +12,19 @@
   // Shortcut mappings for different page types
   const SHORTCUTS = {
     job: [
-      { key: 'B', text: ['Build with Parameters', 'Build Now', '빌드 실행'], selector: 'a[href*="build?"]' },
-      { key: 'C', text: ['구성', 'Configure'], selector: 'a[href$="/configure"]' },
-      { key: 'H', text: ['Job Config History'], selector: 'a[href*="jobConfigHistory"]', isSpecial: true },
-      { key: 'R', text: ['이름 바꾸기', 'Rename'], selector: 'a[href$="/confirm-rename"]' }
+      { key: 'B', text: ['Build with Parameters', 'Build Now', '빌드 실행'], selector: '#side-panel a[href*="build?"], .task a[href*="build?"]' },
+      { key: 'C', text: ['구성', 'Configure'], selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"]' },
+      { key: 'H', text: ['Job Config History'], selector: '#side-panel a[href*="jobConfigHistory"], .task a[href*="jobConfigHistory"]' },
+      { key: 'R', text: ['이름 바꾸기', 'Rename'], selector: '#side-panel a[href$="/confirm-rename"], .task a[href$="/confirm-rename"]' }
     ],
     build: [
-      { key: 'D', text: ['Delete build', '빌드 삭제'], selector: 'a[href*="doDelete"]' },
-      { key: 'C/T', text: ['Console Output', '콘솔 출력'], selector: 'a[href*="/console"]', isSpecial: true },
-      { key: 'E', text: ['Job Config History'], selector: 'a[href*="jobConfigHistory"]', isSpecial: true },
-      { key: 'R', text: ['Retry'], selector: 'a[href*="retry"]' },
-      { key: 'B', text: ['Rebuild', '다시 빌드'], selector: 'a[href*="rebuild"]' },
-      { key: 'G', text: ['Retrigger'], selector: 'a[href*="retrigger"]' },
-      { key: 'P', text: ['Parameters'], selector: 'a[href*="parameters"]' }
+      { key: 'D', text: ['Delete build', '빌드 삭제'], selector: '#side-panel a[href*="doDelete"], .task a[href*="doDelete"]' },
+      { key: 'C/T', text: ['Console Output', '콘솔 출력'], selector: '#side-panel a[href*="/console"], .task a[href*="/console"]', isSpecial: true },
+      { key: 'E', text: ['Environment Variables'], selector: '#side-panel a[href*="injectedEnvVars"], .task a[href*="injectedEnvVars"]' },
+      { key: 'R', text: ['Retry'], selector: '#side-panel a[href*="retry"], .task a[href*="retry"]' },
+      { key: 'B', text: ['Rebuild', '다시 빌드'], selector: '#side-panel a[href*="rebuild"], .task a[href*="rebuild"]' },
+      { key: 'G', text: ['Retrigger'], selector: '#side-panel a[href*="retrigger"], .task a[href*="retrigger"]' },
+      { key: 'P', text: ['Parameters'], selector: '#side-panel a[href*="parameters"], .task a[href*="parameters"]' }
     ]
   };
 
@@ -86,31 +86,19 @@
     const foundLinks = [];
 
     shortcuts.forEach(shortcut => {
-      // Special handling for Job Config History - always show if on job/build page
-      if (shortcut.key === 'H' || (shortcut.key === 'E' && pageType === 'build')) {
-        // Create a virtual link for Job Config History
-        const currentUrl = window.location.href;
-        const jobUrl = currentUrl.match(/^(.*?\/job\/[^\/]+)\//);
-        if (jobUrl) {
-          foundLinks.push({
-            key: shortcut.key,
-            link: { href: jobUrl[1] + '/jobConfigHistory', click: function() { window.location.href = this.href; } },
-            text: shortcut.text,
-            isVirtual: true
-          });
-        }
-        return;
-      }
-
       // Try to find by selector first
       let link = document.querySelector(shortcut.selector);
       
-      // If not found by selector, try to find by text content
+      // If not found by selector, try to find by text content (case-insensitive)
       if (!link) {
-        const allLinks = document.querySelectorAll('#side-panel a, .task a');
+        const allLinks = document.querySelectorAll('#side-panel a, .task a, #tasks a');
         for (const a of allLinks) {
-          const text = a.textContent.trim();
-          if (shortcut.text.some(t => text.includes(t))) {
+          const text = a.textContent.trim().toLowerCase();
+          
+          // Check text content
+          const foundByText = shortcut.text.some(t => text.includes(t.toLowerCase()));
+          
+          if (foundByText) {
             link = a;
             break;
           }
@@ -145,23 +133,6 @@
     links.forEach(item => {
       const link = item.link;
       
-      // For virtual links (like Job Config History), create a visual indicator
-      if (item.isVirtual) {
-        // Find the side panel to add hint
-        const sidePanel = document.querySelector('#side-panel, #tasks');
-        if (sidePanel) {
-          const hintDiv = document.createElement('div');
-          hintDiv.className = 'jenkins-shortcut-virtual';
-          hintDiv.innerHTML = `<span class="jenkins-shortcut-hint">${item.key}</span> Job Config History`;
-          hintDiv.dataset.shortcutKey = item.key;
-          hintDiv.dataset.url = link.href;
-          hintDiv.style.cssText = 'padding: 4px 8px; cursor: pointer; margin: 2px 0;';
-          hintDiv.onclick = () => { window.location.href = link.href; };
-          sidePanel.appendChild(hintDiv);
-        }
-        return;
-      }
-      
       // Skip if already has a hint
       if (link.querySelector && link.querySelector('.jenkins-shortcut-hint')) return;
 
@@ -171,9 +142,23 @@
       hint.textContent = item.key;
       hint.title = `Press ${item.key} to navigate`;
 
-      // Insert hint at the beginning of the link
-      if (link.insertBefore && link.firstChild) {
-        link.insertBefore(hint, link.firstChild);
+      // Find the right position to insert: after icon/image, before text
+      let insertPosition = null;
+      
+      // Look for SVG or IMG elements
+      const iconElements = link.querySelectorAll('svg, img');
+      if (iconElements.length > 0) {
+        // Insert after the last icon
+        insertPosition = iconElements[iconElements.length - 1].nextSibling;
+      } else {
+        // No icon found, insert at the beginning
+        insertPosition = link.firstChild;
+      }
+      
+      if (insertPosition) {
+        link.insertBefore(hint, insertPosition);
+      } else {
+        link.appendChild(hint);
       }
     });
 
@@ -186,9 +171,6 @@
 
     const hints = document.querySelectorAll('.jenkins-shortcut-hint');
     hints.forEach(hint => hint.remove());
-    
-    const virtualHints = document.querySelectorAll('.jenkins-shortcut-virtual');
-    virtualHints.forEach(hint => hint.remove());
 
     shortcutsActive = false;
     console.log('Shortcuts deactivated');
@@ -203,8 +185,8 @@
 
     const keyUpper = key.toUpperCase();
 
-    // Special handling for H - Job Config History
-    if (keyUpper === 'H' || (keyUpper === 'E' && pageType === 'build')) {
+    // Special handling for H - Job Config History (always available)
+    if (keyUpper === 'H') {
       const currentUrl = window.location.href;
       const jobUrl = currentUrl.match(/^(.*?\/job\/[^\/]+)\//);      if (jobUrl) {
         const targetUrl = jobUrl[1] + '/jobConfigHistory';
@@ -236,35 +218,16 @@
     const shortcuts = SHORTCUTS[pageType];
     const shortcut = shortcuts.find(s => s.key.toUpperCase() === keyUpper);
     
-    if (!shortcut) return false;
-
-    // Special handling for Build shortcut on job page
-    if (pageType === 'job' && shortcut.key === 'B') {
-      // Try "Build with Parameters" first
-      let link = document.querySelector('a[href*="build?"]');
-      
-      // If not found, try "Build Now"
-      if (!link) {
-        const allLinks = document.querySelectorAll('#side-panel a, .task a');
-        for (const a of allLinks) {
-          const text = a.textContent.trim();
-          if (text.includes('Build Now') || text.includes('빌드 실행') || text.includes('Build with Parameters')) {
-            link = a;
-            break;
-          }
-        }
-      }
-
-      if (link) {
-        console.log('Navigating to:', link.href);
-        link.click();
-        hideShortcuts();
-        return true;
-      }
+    if (!shortcut) {
+      console.log(`No shortcut found for key: ${keyUpper}`);
+      return false;
     }
+    
+    console.log(`Found shortcut for ${keyUpper}:`, shortcut);
 
     // Find the link by selector first
     let link = document.querySelector(shortcut.selector);
+    console.log(`Selector result for ${keyUpper}:`, link);
     
     // If not found by selector, try to find by text content
     if (!link) {
@@ -273,6 +236,7 @@
         const text = a.textContent.trim();
         if (shortcut.text.some(t => text.includes(t))) {
           link = a;
+          console.log(`Found ${keyUpper} by text match:`, text);
           break;
         }
       }
@@ -280,7 +244,28 @@
 
     if (link) {
       console.log('Navigating to:', link.href);
-      link.click();
+      
+      // For links with onclick handlers, trigger the onclick first
+      if (link.onclick) {
+        try {
+          const result = link.onclick.call(link, new MouseEvent('click'));
+          // If onclick returns false, don't navigate
+          if (result === false) {
+            hideShortcuts();
+            return true;
+          }
+        } catch (e) {
+          console.log('onclick handler error:', e);
+        }
+      }
+      
+      // Use direct navigation instead of click() to bypass event handlers
+      if (link.href && link.href !== '#' && link.href !== 'javascript:void(0)') {
+        window.location.href = link.href;
+      } else {
+        link.click();
+      }
+      
       hideShortcuts();
       return true;
     }
