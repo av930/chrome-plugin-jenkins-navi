@@ -3,6 +3,59 @@ let config = {};
 let previousJobUrl = ''; // ^http.*/job/.*/ 패턴과 정확히 match되는 이전 URL 저장
 let previousBuildUrl = ''; // ^http.*/job/.*/[0-9]+/ 패턴의 정확히 match되는 이전 URL 저장
 
+// Save URL visit history to storage
+async function saveUrlVisit(url) {
+  if (!url || !url.includes('jenkins')) return;
+  
+  try {
+    // Normalize URL: Remove build numbers, console, etc. Keep only up to /job/jobname
+    let normalizedUrl = url;
+    
+    // Pattern: http://~/job/jobname/12345/... or /console -> keep only http://~/job/jobname
+    const jobMatch = url.match(/^(https?:\/\/.+?\/job\/[^\/]+)/);
+    if (jobMatch) {
+      normalizedUrl = jobMatch[1] + '/';
+    }
+    
+    const result = await chrome.storage.local.get(['urlHistory']);
+    let urlHistory = result.urlHistory || {};
+    
+    // Check if URL is in the last 5 entries
+    const entries = Object.entries(urlHistory);
+    entries.sort((a, b) => b[1].lastVisit - a[1].lastVisit);
+    const recentUrls = entries.slice(0, 5).map(([url]) => url);
+    
+    if (recentUrls.includes(normalizedUrl)) {
+      console.log('URL already in recent 5, skipping:', normalizedUrl);
+      return;
+    }
+    
+    // 기존 방문 횟수 증가 또는 새로 추가
+    if (urlHistory[normalizedUrl]) {
+      urlHistory[normalizedUrl].count++;
+      urlHistory[normalizedUrl].lastVisit = Date.now();
+    } else {
+      urlHistory[normalizedUrl] = {
+        count: 1,
+        firstVisit: Date.now(),
+        lastVisit: Date.now()
+      };
+    }
+    
+    // 최근 90개만 유지 (가장 최근 방문 기준)
+    const allEntries = Object.entries(urlHistory);
+    if (allEntries.length > 90) {
+      allEntries.sort((a, b) => b[1].lastVisit - a[1].lastVisit);
+      urlHistory = Object.fromEntries(allEntries.slice(0, 90));
+    }
+    
+    await chrome.storage.local.set({ urlHistory });
+    console.log('URL visit saved:', normalizedUrl, 'count:', urlHistory[normalizedUrl].count);
+  } catch (error) {
+    console.error('Failed to save URL visit:', error);
+  }
+}
+
 // Generate version string: v년도.날짜시간분 (분은 10분 단위)
 function generateVersion() {
   const now = new Date();
@@ -154,6 +207,9 @@ async function createRadioButtons() {
     if (tabs && tabs.length > 0) {
       currentTabUrl = tabs[0].url || '';
       console.log('Current tab URL:', currentTabUrl);
+      
+      // URL 방문 기록 저장
+      await saveUrlVisit(currentTabUrl);
     }
   } catch (error) {
     console.error('Failed to get current tab URL:', error);
