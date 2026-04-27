@@ -1,6 +1,7 @@
 // Default config.list content
 const DEFAULT_CONFIG = {
-  "sites": {
+  // add your jenkins url
+  "sites": { 
     "V1": "http://jenkins.rge.com/jenkins01",
     "V2": "http://jenkins.rge.com/jenkins02",
     "V3": "http://jenkins.rge.com/jenkins03",
@@ -8,9 +9,10 @@ const DEFAULT_CONFIG = {
     "L1": "http://mysite.rge.com",
     "C1": "http://myjenkins.rge.com"
   },
+  // add favorite menu in jenkins
   "menus": {
     "node": "computer",
-    "trigger": "gerrit-trigger",
+    "trigger": "gerrit_manual_trigger",
     "manage-role": "role-strategy/manage-roles",
     "assign-role": "role-strategy/assign-roles",
     "credentials": "credentials",
@@ -18,19 +20,28 @@ const DEFAULT_CONFIG = {
     "toolconfig": "configureTools",
     "systemInfo": "systemInfo"
   },
+  // automatically added after your job url
   "job": {
     "textlog": "lastBuild/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog",
     "conslog": "lastBuild/consoleFull",
     "env-var": "lastBuild/injectedEnvVars",
     "rebuild": "lastBuild/rebuild/parameterized"
   },
+  // add your job frequently visited  
   "custom": {
+   "honda": "http://jenkins.rge.com/jenkins06/view/HONDA%2026my/job/ci_buildchecker/",
     "vgit_na": "https://git.rge.com/na",
     "vgit_eu": "https://git.rge.com/eu",
     "vgit_as": "https://git.rge.com/as",
     "collab": "https://collab.rge.com",
     "jira": "https://jira.rge.com",
     "custom": "http://your.custom.com"
+  },
+  // You can call the job with PARAM1, PARAM2  
+  "run": { 
+    "rm-history": "http://jenkins.rge.com/jenkins03/job/_SFolder_CommonUtility/job/ControlJenkins/buildWithParameters?token=plugin",
+    "retrigger": "http://jenkins.rge.com/jenkins03/job/Common_retriggerJOB/buildWithParameters?token=plugin",
+    "temp_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin"
   }
 };
 

@@ -18,9 +18,6 @@
     "tabs",
     "activeTab"
   ],
-  "host_permissions": [
-    "http://vjenkins.lge.com/*"
-  ],
   "background": {
     "service_worker": "background.js"
   },

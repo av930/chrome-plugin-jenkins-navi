@@ -34,8 +34,8 @@
     "custom": "http://your.custom.com"
   },
   "run": {
-    "rm-history": "http://vjenkins.lge.com/jenkins03/job/_SFolder_CommonUtility/job/ControlJenkins/buildWithParameters?token=plugin",
-    "retrigger": "http://vjenkins.lge.com/jenkins03/job/Common_retriggerJOB/buildWithParameters?token=plugin"
+    "rm-history": "http://jenkins.rge.com/jenkins03/job/_SFolder_CommonUtility/job/ControlJenkins/buildWithParameters?token=plugin",
+    "retrigger": "http://jenkins.rge.com/jenkins03/job/Common_retriggerJOB/buildWithParameters?token=plugin"
     "temp_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin"
   }
 }
