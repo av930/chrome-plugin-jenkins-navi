@@ -69,8 +69,8 @@ async function loadConfig() {
       console.log('Config loaded from config.default and saved to storage as userConfigText');
     }
 
-    // 라디오 버튼 생성
-    createRadioButtons();
+    // 라디오 버튼 생성 (await로 완료 대기)
+    await createRadioButtons();
 
     // config.list의 순서대로 버튼 생성 (sites 제외)
     createButtonsInOrder();
@@ -156,10 +156,46 @@ async function createRadioButtons() {
     return;
   }
 
-  // 저장된 site 불러오기
+  // 현재 활성화된 탭의 URL 가져오기 (pageUrl이 없을 경우)
+  let currentTabUrl = '';
+  if (pageUrl) {
+    currentTabUrl = decodeURIComponent(pageUrl);
+    console.log('Current page URL (from param):', currentTabUrl);
+  } else {
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs && tabs.length > 0) {
+        currentTabUrl = tabs[0].url || '';
+        console.log('Current tab URL:', currentTabUrl);
+      }
+    } catch (error) {
+      console.error('Failed to get current tab URL:', error);
+    }
+  }
+
+  // 현재 URL과 매치되는 site 찾기 (프로토콜 무시)
+  let matchedSite = null;
+  for (const [siteName, siteUrl] of Object.entries(sites)) {
+    if (currentTabUrl) {
+      // 프로토콜을 제거하고 비교 (http:// 또는 https://)
+      const normalizedCurrentUrl = currentTabUrl.replace(/^https?:\/\//, '');
+      const normalizedSiteUrl = siteUrl.replace(/^https?:\/\//, '');
+      
+      if (normalizedCurrentUrl.startsWith(normalizedSiteUrl)) {
+        matchedSite = siteName;
+        console.log('Matched site from URL:', matchedSite, '(', siteUrl, ')');
+        break;
+      }
+    }
+  }
+
+  // 저장된 site 불러오기 (URL 매치가 없을 경우 fallback)
   const result = await chrome.storage.local.get(['selectedSite']);
   const savedSite = result.selectedSite;
   console.log('Saved site:', savedSite);
+
+  // 선택 우선순위: 1) URL 매치 2) 저장된 site 3) 첫 번째 항목
+  const siteToSelect = matchedSite || savedSite;
 
   let isFirst = true;
   for (const [siteName, siteUrl] of Object.entries(sites)) {
@@ -171,9 +207,9 @@ async function createRadioButtons() {
     input.name = 'server';
     input.value = siteName;
 
-    // 저장된 site가 있으면 그것을 선택, 없으면 첫 번째 항목 선택
-    if (savedSite) {
-      input.checked = (siteName === savedSite);
+    // 우선순위에 따라 선택
+    if (siteToSelect) {
+      input.checked = (siteName === siteToSelect);
     } else if (isFirst) {
       input.checked = true;
       isFirst = false;
