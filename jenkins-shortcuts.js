@@ -126,13 +126,14 @@
   function detectPageType() {
     const url = window.location.href;
     
-    // Build page pattern: /job/jobname/buildnumber/
-    if (/\/job\/[^\/]+\/\d+\/?/.test(url)) {
+    // Build page pattern: /job/jobname/buildnumber/ (supports nested jobs like /job/folder/job/name/123/)
+    if (/\/job\/[^\/]+(\/job\/[^\/]+)*\/\d+\/?/.test(url)) {
       return 'build';
     }
     
-    // Job page pattern: /job/jobname/ or /job/jobname/buildTimeTrend, etc.
-    if (/\/job\/[^\/]+\/?($|#|buildTimeTrend|changes|builds)/.test(url)) {
+    // Job page pattern: /job/jobname/ or /job/folder/job/jobname/ (supports nested folders)
+    // Matches ending with / or #hash or buildTimeTrend, changes, builds
+    if (/\/job\/[^\/]+(\/job\/[^\/]+)*\/?($|#|buildTimeTrend|changes|builds)/.test(url)) {
       return 'job';
     }
     
@@ -269,9 +270,9 @@
     // Special handling for H - Job Config History (always available)
     if (keyUpper === 'H') {
       const currentUrl = window.location.href;
-      const jobUrl = currentUrl.match(/^(.*?\/job\/[^\/]+)\//);      if (jobUrl) {
+      const jobUrl = currentUrl.match(/^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*)\//);
+      if (jobUrl) {
         const targetUrl = jobUrl[1] + '/jobConfigHistory';
-        console.log('Navigating to Job Config History:', targetUrl);
         window.location.href = targetUrl;
         hideShortcuts();
         return true;
@@ -281,7 +282,7 @@
     // Special handling for C and T on build page
     if (pageType === 'build' && (keyUpper === 'C' || keyUpper === 'T')) {
       const currentUrl = window.location.href;
-      const buildUrl = currentUrl.match(/^(.*?\/job\/[^\/]+\/\d+)\/?/);
+      const buildUrl = currentUrl.match(/^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*\/\d+)\/?/);
       if (buildUrl) {
         let targetUrl;
         if (keyUpper === 'C') {
@@ -665,7 +666,6 @@
     });
     
     document.body.appendChild(menu);
-    console.log('URL menu displayed');
   }
 
   // Hide URL menu
@@ -684,9 +684,9 @@
   // Fetch and display statistics report
   async function showStatisticsReport() {
     try {
-      // Get current job URL from page
+      // Get current job URL from page (supports nested jobs like /job/folder/job/name/)
       const currentUrl = window.location.href;
-      const jobMatch = currentUrl.match(/^(.*?\/job\/[^\/]+)/);
+      const jobMatch = currentUrl.match(/^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*)/);
       
       if (!jobMatch) {
         alert('Cannot determine job URL. Please navigate to a Jenkins job page.');
@@ -696,10 +696,10 @@
       const jobBaseUrl = jobMatch[1];
       const apiUrl = jobBaseUrl + '/api/json?tree=fullDisplayName,url,buildable,queueItem,allBuilds[number,building,timestamp,duration,result,url,displayName,description]';
       
-      console.log('Fetching statistics from:', apiUrl);
       
       // Fetch data from Jenkins API
       const response = await fetch(apiUrl);
+      
       if (!response.ok) {
         throw new Error(`Failed to fetch data: ${response.status}`);
       }
@@ -708,6 +708,7 @@
       
       // Open new tab with statistics report
       const reportWindow = window.open('', '_blank');
+      
       if (!reportWindow) {
         alert('Please allow popups to view the statistics report.');
         return;
@@ -719,6 +720,7 @@
       // Use Blob URL to avoid CSP issues
       const blob = new Blob([html], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
+      
       reportWindow.location.href = url;
       
     } catch (error) {
@@ -1346,10 +1348,7 @@
       // Check if on a job page
       const pageType = detectPageType();
       if (pageType === 'job') {
-        console.log('Showing build statistics report');
         await showStatisticsReport();
-      } else {
-        console.log('Z key only works on job pages');
       }
       return;
     }
@@ -1635,7 +1634,6 @@
         // Insert before the insertion point
         if (insertionPoint.parentNode) {
           insertionPoint.parentNode.insertBefore(buttonContainer, insertionPoint);
-          console.log('Navigation button added');
         }
       }
     };
