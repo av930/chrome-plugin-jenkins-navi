@@ -153,8 +153,11 @@
     const foundLinks = [];
 
     shortcuts.forEach(shortcut => {
-      // Try to find by selector first
-      let link = document.querySelector(shortcut.selector);
+      // Try to find by selector first (skip if selector is null)
+      let link = null;
+      if (shortcut.selector) {
+        link = document.querySelector(shortcut.selector);
+      }
       
       // If not found by selector, try to find by text content (case-insensitive)
       if (!link) {
@@ -195,6 +198,12 @@
     }
 
     shortcutsActive = true;
+    
+    // Show z-report button if on job page
+    const reportButton = document.getElementById('jenkins-report-button');
+    if (reportButton) {
+      reportButton.style.display = 'inline-block';
+    }
 
     // Add shortcut hints to each menu item
     links.forEach(item => {
@@ -232,17 +241,25 @@
     console.log(`Shortcuts activated for ${currentPageType} page:`, links.map(l => l.key).join(', '));
   }
 
+
+
   // Hide keyboard shortcuts hints
   function hideShortcuts() {
     if (!shortcutsActive) return;
 
     const hints = document.querySelectorAll('.jenkins-shortcut-hint');
     hints.forEach(hint => {
-      // Don't remove hints that are inside the navigation button container
-      if (!hint.closest('#jenkins-nav-buttons')) {
+      // Don't remove hints that are inside URL menu or navigation buttons
+      if (!hint.closest('#jenkins-url-menu') && !hint.closest('#jenkins-nav-buttons')) {
         hint.remove();
       }
     });
+    
+    // Hide z-report button
+    const reportButton = document.getElementById('jenkins-report-button');
+    if (reportButton) {
+      reportButton.style.display = 'none';
+    }
 
     shortcutsActive = false;
     console.log('Shortcuts deactivated');
@@ -297,9 +314,12 @@
     
     console.log(`Found shortcut for ${keyUpper}:`, shortcut);
 
-    // Find the link by selector first
-    let link = document.querySelector(shortcut.selector);
-    console.log(`Selector result for ${keyUpper}:`, link);
+    // Find the link by selector first (skip if selector is null)
+    let link = null;
+    if (shortcut.selector) {
+      link = document.querySelector(shortcut.selector);
+      console.log(`Selector result for ${keyUpper}:`, link);
+    }
     
     // If not found by selector, try to find by text content
     if (!link) {
@@ -669,6 +689,414 @@
     console.log('URL menu hidden');
   }
 
+  // Fetch and display statistics report
+  async function showStatisticsReport() {
+    try {
+      // Get current job URL from page
+      const currentUrl = window.location.href;
+      const jobMatch = currentUrl.match(/^(.*?\/job\/[^\/]+)/);
+      
+      if (!jobMatch) {
+        alert('Cannot determine job URL. Please navigate to a Jenkins job page.');
+        return;
+      }
+      
+      const jobBaseUrl = jobMatch[1];
+      const apiUrl = jobBaseUrl + '/api/json?tree=fullDisplayName,url,buildable,queueItem,allBuilds[number,building,timestamp,duration,result,url,displayName,description]';
+      
+      console.log('Fetching statistics from:', apiUrl);
+      
+      // Fetch data from Jenkins API
+      const response = await fetch(apiUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch data: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      // Open new tab with statistics report
+      const reportWindow = window.open('', '_blank');
+      if (!reportWindow) {
+        alert('Please allow popups to view the statistics report.');
+        return;
+      }
+      
+      // Generate report HTML
+      const html = generateStatisticsReportHtml(data, jobBaseUrl);
+      
+      // Use Blob URL to avoid CSP issues
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      reportWindow.location.href = url;
+      
+    } catch (error) {
+      console.error('Failed to generate statistics report:', error);
+      alert(`Failed to generate statistics report: ${error.message}`);
+    }
+  }
+
+  // Generate statistics report HTML
+  function generateStatisticsReportHtml(data, jobBaseUrl) {
+    const allBuilds = data.allBuilds || [];
+    
+    // Calculate statistics
+    const totalBuilds = allBuilds.length;
+    const successBuilds = allBuilds.filter(b => b.result === 'SUCCESS').length;
+    const failureBuilds = allBuilds.filter(b => b.result === 'FAILURE').length;
+    const abortedBuilds = allBuilds.filter(b => b.result === 'ABORTED').length;
+    
+    const successRate = totalBuilds > 0 ? ((successBuilds / totalBuilds) * 100).toFixed(2) : '0.00';
+    const failureRate = totalBuilds > 0 ? ((failureBuilds / totalBuilds) * 100).toFixed(2) : '0.00';
+    const abortRate = totalBuilds > 0 ? ((abortedBuilds / totalBuilds) * 100).toFixed(2) : '0.00';
+    
+    // Build range
+    const buildNumbers = allBuilds.map(b => b.number).filter(n => n);
+    const minBuild = buildNumbers.length > 0 ? Math.min(...buildNumbers) : 0;
+    const maxBuild = buildNumbers.length > 0 ? Math.max(...buildNumbers) : 0;
+    const buildRange = `${minBuild}~${maxBuild} (${totalBuilds})`;
+    
+    // Calculate average durations (all based on SUCCESS builds only)
+    const successfulDurations = allBuilds
+      .filter(b => b.result === 'SUCCESS' && b.duration > 0)
+      .map(b => b.duration);
+    
+    const avgDuration = successfulDurations.length > 0
+      ? successfulDurations.reduce((a, b) => a + b, 0) / successfulDurations.length
+      : 0;
+    
+    // Success and <= 20 minutes (1200000ms)
+    const under20min = allBuilds
+      .filter(b => b.result === 'SUCCESS' && b.duration > 0 && b.duration <= 1200000)
+      .map(b => b.duration);
+    const avgUnder20 = under20min.length > 0
+      ? under20min.reduce((a, b) => a + b, 0) / under20min.length
+      : 0;
+    
+    // Success and 20min~3hours (1200000~10800000ms)
+    const between20minAnd3h = allBuilds
+      .filter(b => b.result === 'SUCCESS' && b.duration > 1200000 && b.duration <= 10800000)
+      .map(b => b.duration);
+    const avgBetween = between20minAnd3h.length > 0
+      ? between20minAnd3h.reduce((a, b) => a + b, 0) / between20minAnd3h.length
+      : 0;
+    
+    // Success and >= 3 hours (10800000ms)
+    const over3h = allBuilds
+      .filter(b => b.result === 'SUCCESS' && b.duration > 10800000)
+      .map(b => b.duration);
+    const avgOver3h = over3h.length > 0
+      ? over3h.reduce((a, b) => a + b, 0) / over3h.length
+      : 0;
+    
+    // Format duration as HH:MM:SS
+    const formatDuration = (ms) => {
+      if (!ms || ms === 0) return '-';
+      const seconds = Math.floor(ms / 1000);
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    };
+    
+    // Format timestamp
+    const formatTimestamp = (ts) => {
+      if (!ts) return '-';
+      const date = new Date(ts);
+      return date.toLocaleString('ko-KR', { 
+        year: 'numeric', 
+        month: '2-digit', 
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+    };
+    
+    // Get result color
+    const getResultColor = (result) => {
+      switch(result) {
+        case 'SUCCESS': return '#4CAF50';
+        case 'FAILURE': return '#f44336';
+        case 'ABORTED': return '#9E9E9E';
+        case 'UNSTABLE': return '#FF9800';
+        default: return '#2196F3';
+      }
+    };
+    
+    // Generate table rows
+    const tableRows = allBuilds.map(build => {
+      const buildUrl = build.url || `${jobBaseUrl}/${build.number}`;
+      const timestampUrl = `${buildUrl}/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog&locale=en`;
+      const resultColor = getResultColor(build.result);
+      const isBuilding = build.building ? ' class="building-blink"' : '';
+      
+      return `
+        <tr>
+          <td style="text-align: center;"${isBuilding}><a href="${buildUrl}" target="_blank" style="color: #1976D2; text-decoration: none;">#${build.number}</a></td>
+          <td style="text-align: center;">
+            <span style="color: white; background-color: ${resultColor}; padding: 4px 8px; border-radius: 3px; text-decoration: none; display: inline-block;">
+              ${build.result || 'RUNNING'}
+            </span>
+          </td>
+          <td style="text-align: center;"><a href="${timestampUrl}" target="_blank" style="color: #1976D2; text-decoration: none;">${formatTimestamp(build.timestamp)}</a></td>
+          <td style="text-align: center;">${formatDuration(build.duration)}</td>
+          <td>${build.displayName || '-'}</td>
+          <td style="font-size: 12px;">${build.description || '-'}</td>
+        </tr>
+      `;
+    }).join('');
+    
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Z-report</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background-color: #f5f5f5;
+    }
+    .header {
+      background-color: #1976D2;
+      color: white;
+      padding: 20px;
+      border-radius: 5px;
+      margin-bottom: 20px;
+    }
+    .header h1 {
+      margin: 0 0 10px 0;
+      font-size: 24px;
+    }
+    .header-info {
+      font-size: 14px;
+      margin: 5px 0;
+    }
+    .stats-container {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+    .stat-card {
+      flex: 1;
+      min-width: 140px;
+      background-color: white;
+      padding: 12px;
+      border-radius: 5px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .stat-card h3 {
+      margin: 0 0 8px 0;
+      font-size: 12px;
+      color: #666;
+      white-space: nowrap;
+    }
+    .stat-card .value {
+      font-size: 24px;
+      font-weight: bold;
+      color: #1976D2;
+    }
+    .stat-card .sub-text {
+      font-size: 11px;
+      color: #666;
+      margin-top: 4px;
+    }
+    .table-container {
+      background-color: white;
+      padding: 20px;
+      border-radius: 5px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      overflow-x: auto;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th {
+      background-color: #1976D2;
+      color: white;
+      padding: 12px;
+      text-align: left;
+      font-weight: bold;
+      position: sticky;
+      top: 0;
+      cursor: pointer;
+      user-select: none;
+    }
+    th:hover {
+      background-color: #1565C0;
+    }
+    td {
+      padding: 10px;
+      border-bottom: 1px solid #ddd;
+    }
+    tr:hover {
+      background-color: #f5f5f5;
+    }
+    @keyframes blink {
+      0%, 50%, 100% { opacity: 1; }
+      25%, 75% { opacity: 0.3; }
+    }
+    .building-blink {
+      animation: blink 2s infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Build Statistics Report</h1>
+    <div class="header-info"><strong>Job:</strong> ${data.fullDisplayName || 'N/A'}</div>
+    <div class="header-info"><strong>URL:</strong> <a href="${data.url || jobBaseUrl}" target="_blank" style="color: white;">${data.url || jobBaseUrl}</a></div>
+    <div class="header-info"><strong>Buildable:</strong> ${data.buildable !== undefined ? (data.buildable ? 'Yes' : 'No') : 'N/A'}</div>
+    <div class="header-info"><strong>Build Range:</strong> ${buildRange}</div>
+  </div>
+  
+  <div class="stats-container">
+    <div class="stat-card">
+      <h3>Success Rate</h3>
+      <div class="value">${successRate}%</div>
+      <div class="sub-text">${successBuilds} / ${totalBuilds}</div>
+    </div>
+    <div class="stat-card">
+      <h3>Failure Rate</h3>
+      <div class="value">${failureRate}%</div>
+      <div class="sub-text">${failureBuilds} / ${totalBuilds}</div>
+    </div>
+    <div class="stat-card">
+      <h3>Abort Rate</h3>
+      <div class="value">${abortRate}%</div>
+      <div class="sub-text">${abortedBuilds} / ${totalBuilds}</div>
+    </div>
+    <div class="stat-card">
+      <h3>Avg (Success)</h3>
+      <div class="value" style="font-size: 18px;">${formatDuration(avgDuration)}</div>
+      <div class="sub-text">${successfulDurations.length} builds</div>
+    </div>
+    <div class="stat-card">
+      <h3>Avg (≤20min)</h3>
+      <div class="value" style="font-size: 18px;">${formatDuration(avgUnder20)}</div>
+      <div class="sub-text">${under20min.length} builds</div>
+    </div>
+    <div class="stat-card">
+      <h3>Avg (20m~3h)</h3>
+      <div class="value" style="font-size: 18px;">${formatDuration(avgBetween)}</div>
+      <div class="sub-text">${between20minAnd3h.length} builds</div>
+    </div>
+    <div class="stat-card">
+      <h3>Avg (≥3h)</h3>
+      <div class="value" style="font-size: 18px;">${formatDuration(avgOver3h)}</div>
+      <div class="sub-text">${over3h.length} builds</div>
+    </div>
+  </div>
+  
+  <div class="table-container">
+    <h2 style="margin-top: 0;">All Builds (${totalBuilds})</h2>
+    <table id="buildsTable">
+      <thead>
+        <tr>
+          <th style="text-align: center;" data-column="0">Number ▼</th>
+          <th style="text-align: center;" data-column="1">Result ▼</th>
+          <th style="text-align: center;" data-column="2">Timestamp ▼</th>
+          <th style="text-align: center;" data-column="3">Duration ▼</th>
+          <th data-column="4">Display Name ▼</th>
+          <th data-column="5">Description ▼</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRows}
+      </tbody>
+    </table>
+  </div>
+  
+  <div style="margin-top: 20px; text-align: center; color: #666; font-size: 12px;">
+    Generated at ${new Date().toLocaleString('ko-KR')}
+  </div>
+  
+  <script>
+    document.title = 'Z-report';
+    
+    let sortDirections = [1, 1, 1, 1, 1, 1]; // 1 for ascending, -1 for descending
+    
+    function sortTable(columnIndex) {
+      const table = document.getElementById('buildsTable');
+      const tbody = table.querySelector('tbody');
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      
+      // Toggle sort direction
+      sortDirections[columnIndex] *= -1;
+      const direction = sortDirections[columnIndex];
+      
+      rows.sort((a, b) => {
+        let aValue = a.cells[columnIndex].textContent.trim();
+        let bValue = b.cells[columnIndex].textContent.trim();
+        
+        // Special handling for Number column (extract number from #123)
+        if (columnIndex === 0) {
+          aValue = parseInt(aValue.replace('#', '')) || 0;
+          bValue = parseInt(bValue.replace('#', '')) || 0;
+          return direction * (aValue - bValue);
+        }
+        
+        // Special handling for Duration column (convert HH:MM:SS to seconds)
+        if (columnIndex === 3) {
+          const aSeconds = timeToSeconds(aValue);
+          const bSeconds = timeToSeconds(bValue);
+          return direction * (aSeconds - bSeconds);
+        }
+        
+        // Special handling for Timestamp column
+        if (columnIndex === 2) {
+          const aDate = new Date(aValue).getTime() || 0;
+          const bDate = new Date(bValue).getTime() || 0;
+          return direction * (aDate - bDate);
+        }
+        
+        // String comparison for other columns
+        return direction * aValue.localeCompare(bValue);
+      });
+      
+      // Clear and re-append sorted rows
+      tbody.innerHTML = '';
+      rows.forEach(row => tbody.appendChild(row));
+      
+      // Update sort indicators
+      const headers = table.querySelectorAll('th');
+      headers.forEach((th, idx) => {
+        const text = th.textContent.replace(' ▼', '').replace(' ▲', '');
+        if (idx === columnIndex) {
+          th.textContent = text + (direction === 1 ? ' ▲' : ' ▼');
+        } else {
+          th.textContent = text + ' ▼';
+        }
+      });
+    }
+    
+    function timeToSeconds(timeStr) {
+      if (timeStr === '-') return 0;
+      const parts = timeStr.split(':');
+      if (parts.length !== 3) return 0;
+      return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+    }
+    
+    // Add event listeners to table headers
+    document.addEventListener('DOMContentLoaded', function() {
+      const headers = document.querySelectorAll('#buildsTable th');
+      headers.forEach((th, index) => {
+        th.addEventListener('click', function() {
+          sortTable(index);
+        });
+      });
+    });
+  </script>
+</body>
+</html>
+    `;
+  }
+
   // Check if focus is in an input field
   function isFocusInInput() {
     const activeElement = document.activeElement;
@@ -738,6 +1166,34 @@
       
       console.log('Going forward to next page');
       window.history.forward();
+      return;
+    }
+
+    // Z key: Show build statistics report (only on job pages and when shortcuts are active)
+    if (key === 'Z' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      
+      // Check if shortcuts are active
+      if (!shortcutsActive) {
+        console.log('Shortcuts are not active. Press F to activate.');
+        return;
+      }
+      
+      // Check if on a Jenkins site
+      const isJenkins = await isJenkinsSite();
+      if (!isJenkins) {
+        console.log('Not on a configured Jenkins site');
+        return;
+      }
+      
+      // Check if on a job page
+      const pageType = detectPageType();
+      if (pageType === 'job') {
+        console.log('Showing build statistics report');
+        await showStatisticsReport();
+      } else {
+        console.log('Z key only works on job pages');
+      }
       return;
     }
 
@@ -942,6 +1398,25 @@
         };
         
         buttonContainer.appendChild(navButton);
+        
+        // Add Z-report button only on job pages (hidden initially)
+        const pageType = detectPageType();
+        if (pageType === 'job') {
+          const reportButton = document.createElement('span');
+          reportButton.textContent = 'z-report';
+          reportButton.className = 'jenkins-shortcut-hint';
+          reportButton.id = 'jenkins-report-button';
+          reportButton.title = 'Press Z for Build Statistics Report';
+          reportButton.style.marginLeft = '8px';
+          reportButton.style.cursor = 'pointer';
+          reportButton.style.display = 'none';
+          
+          reportButton.onclick = () => {
+            showStatisticsReport();
+          };
+          
+          buttonContainer.appendChild(reportButton);
+        }
         
         // Insert before the insertion point
         if (insertionPoint.parentNode) {
