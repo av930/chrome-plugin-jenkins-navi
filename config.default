@@ -12,7 +12,7 @@
     "sys-trigger": "gerrit_manual_trigger",
     "manage-role": "role-strategy/manage-roles",
     "assign-role": "role-strategy/assign-roles",
-    "credentials": "credentials",
+    "disk-usage": "disk-usage-simple",
     "config": "configure",
     "toolconfig": "configureTools",
     "systemInfo": "systemInfo"
