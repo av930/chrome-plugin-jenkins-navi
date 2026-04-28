@@ -45,7 +45,6 @@
       const recentUrls = entries.slice(0, 5).map(([url]) => url);
       
       if (recentUrls.includes(normalizedUrl)) {
-        console.log('URL already in recent 5, skipping:', normalizedUrl);
         return;
       }
       
@@ -69,7 +68,6 @@
       }
       
       await chrome.storage.local.set({ urlHistory });
-      console.log('URL visit saved:', normalizedUrl, 'count:', urlHistory[normalizedUrl].count);
     } catch (error) {
       console.error('Failed to save URL visit:', error);
     }
@@ -100,8 +98,7 @@
     try {
       // Check if extension context is still valid
       if (!chrome.runtime?.id) {
-        console.log('Extension context invalidated, using URL fallback');
-        return window.location.href.includes('jenkins');
+        return;
       }
 
       const result = await chrome.storage.local.get(['userConfigText']);
@@ -121,7 +118,6 @@
       // Fallback: check if URL contains 'jenkins'
       return window.location.href.includes('jenkins');
     } catch (error) {
-      console.log('Failed to check Jenkins site (using URL fallback):', error.message);
       return window.location.href.includes('jenkins');
     }
   }
@@ -193,7 +189,6 @@
 
     const links = findMenuLinks();
     if (links.length === 0) {
-      console.log('No menu links found on this page');
       return;
     }
 
@@ -237,8 +232,6 @@
         link.appendChild(hint);
       }
     });
-
-    console.log(`Shortcuts activated for ${currentPageType} page:`, links.map(l => l.key).join(', '));
   }
 
 
@@ -262,7 +255,6 @@
     }
 
     shortcutsActive = false;
-    console.log('Shortcuts deactivated');
   }
 
   // Navigate to menu by shortcut key
@@ -347,7 +339,7 @@
             return true;
           }
         } catch (e) {
-          console.log('onclick handler error:', e);
+          // Ignore onclick errors
         }
       }
       
@@ -944,6 +936,60 @@
     .building-blink {
       animation: blink 2s infinite;
     }
+    .delete-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+    }
+    .delete-container input {
+      width: 70px;
+      padding: 6px 8px;
+      border: 1px solid #ddd;
+      border-radius: 3px;
+      font-size: 14px;
+      text-align: center;
+    }
+    /* Remove spinner buttons from number inputs */
+    .delete-container input[type=number]::-webkit-inner-spin-button,
+    .delete-container input[type=number]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    .delete-container input[type=number] {
+      -moz-appearance: textfield;
+    }
+    .delete-container button {
+      background-color: #f44336;
+      color: white;
+      border: none;
+      padding: 6px 16px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: bold;
+    }
+    .delete-container button:hover {
+      background-color: #d32f2f;
+    }
+    .delete-container button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    #deleteStatus {
+      font-size: 12px;
+      color: #666;
+      margin-left: 5px;
+    }
+    .table-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 15px;
+    }
+    .table-header h2 {
+      margin: 0;
+    }
   </style>
 </head>
 <body>
@@ -994,7 +1040,17 @@
   </div>
   
   <div class="table-container">
-    <h2 style="margin-top: 0;">All Builds (${totalBuilds})</h2>
+    <div class="table-header">
+      <h2>All Builds (${totalBuilds})</h2>
+      <div class="delete-container">
+        <span style="font-weight: bold; font-size: 14px;">Delete build</span>
+        <input type="number" id="deleteStartBuild" value="${minBuild}" min="1" />
+        <span>~</span>
+        <input type="number" id="deleteEndBuild" value="${maxBuild}" min="1" />
+        <button id="deleteBuildBtn" onclick="deleteBuildsInRange()">Delete</button>
+        <span id="deleteStatus"></span>
+      </div>
+    </div>
     <table id="buildsTable">
       <thead>
         <tr>
@@ -1019,7 +1075,108 @@
   <script>
     document.title = 'Z-report';
     
+    const JOB_BASE_URL = '${jobBaseUrl}';
     let sortDirections = [1, 1, 1, 1, 1, 1]; // 1 for ascending, -1 for descending
+    
+    // Delete builds in range using window.opener postMessage
+    async function deleteBuildsInRange() {
+      const startBuild = parseInt(document.getElementById('deleteStartBuild').value);
+      const endBuild = parseInt(document.getElementById('deleteEndBuild').value);
+      const statusEl = document.getElementById('deleteStatus');
+      const deleteBtn = document.getElementById('deleteBuildBtn');
+      
+      if (isNaN(startBuild) || isNaN(endBuild)) {
+        alert('Please enter valid build numbers');
+        return;
+      }
+      
+      if (startBuild > endBuild) {
+        alert('Start build number must be less than or equal to end build number');
+        return;
+      }
+      
+      if (!window.opener) {
+        alert('Cannot communicate with parent window. Please open z-report from Jenkins page.');
+        return;
+      }
+      
+      const count = endBuild - startBuild + 1;
+      if (!confirm(\`Are you sure you want to delete \${count} builds from #\${startBuild} to #\${endBuild}?\nAfter deleting this, you have to renew the report manually to refresh.\`)) {
+        return;
+      }
+      
+      deleteBtn.disabled = true;
+      statusEl.textContent = 'Preparing...';
+      statusEl.style.color = '#666';
+      
+      let successCount = 0;
+      let failCount = 0;
+      let errors = [];
+      
+      // Delete builds one by one
+      for (let buildNum = startBuild; buildNum <= endBuild; buildNum++) {
+        const deleteUrl = \`\${JOB_BASE_URL}/\${buildNum}/doDelete\`;
+        statusEl.textContent = \`Deleting #\${buildNum} (\${buildNum - startBuild + 1}/\${count})...\`;
+        
+        try {
+          // Send delete request to opener via postMessage
+          const result = await new Promise((resolve, reject) => {
+            const messageId = 'delete_' + Date.now() + '_' + Math.random();
+            
+            const messageHandler = (event) => {
+              if (event.data && event.data.type === 'deleteResponse' && event.data.messageId === messageId) {
+                window.removeEventListener('message', messageHandler);
+                resolve(event.data);
+              }
+            };
+            
+            window.addEventListener('message', messageHandler);
+            
+            // Send message to opener
+            window.opener.postMessage({
+              type: 'deleteRequest',
+              messageId: messageId,
+              deleteUrl: deleteUrl
+            }, '*');
+            
+            // Timeout after 15 seconds
+            setTimeout(() => {
+              window.removeEventListener('message', messageHandler);
+              reject(new Error('Timeout'));
+            }, 15000);
+          });
+          
+          if (result.success) {
+            successCount++;
+          } else {
+            failCount++;
+            const errorMsg = \`#\${buildNum}: \${result.error || result.statusText || 'HTTP ' + result.status || 'Unknown error'}\`;
+            errors.push(errorMsg);
+            console.error('Delete failed:', errorMsg, result);
+          }
+        } catch (error) {
+          failCount++;
+          const errorMsg = \`#\${buildNum}: \${error.message}\`;
+          errors.push(errorMsg);
+          console.error('Error deleting build:', error);
+        }
+        
+        // Small delay to avoid overwhelming the server
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      deleteBtn.disabled = false;
+      statusEl.textContent = \`Done: \${successCount} deleted, \${failCount} failed\`;
+      statusEl.style.color = failCount > 0 ? '#f44336' : '#4CAF50';
+      
+      if (errors.length > 0 && errors.length <= 5) {
+        console.error('Delete errors:', errors);
+      }
+      
+      if (failCount === count) {
+        alert('All deletions failed. Check console for details.');
+      }
+    }
     
     function sortTable(columnIndex) {
       const table = document.getElementById('buildsTable');
@@ -1301,13 +1458,8 @@
     // Check if on a Jenkins site
     const isJenkins = await isJenkinsSite();
     if (!isJenkins) {
-      console.log('Jenkins shortcuts: Not on a Jenkins site');
       return;
     }
-
-    console.log('Jenkins shortcuts: Initialized on', window.location.href);
-    console.log('Press F to show/hide keyboard shortcuts');
-    console.log('Press A to go back, Q to go to parent URL');
 
     // Add navigation buttons
     addNavigationButtons();
@@ -1318,6 +1470,69 @@
     // Add keyboard event listener
     document.addEventListener('keydown', handleKeyPress);
     
+    // Listen for delete requests from z-report window
+    window.addEventListener('message', async (event) => {
+      if (event.data && event.data.type === 'deleteRequest') {
+        const { messageId, deleteUrl } = event.data;
+        
+        try {
+          // Get Jenkins Crumb first
+          let crumb = null;
+          try {
+            const url = new URL(deleteUrl);
+            const pathParts = url.pathname.split('/').filter(p => p);
+            let jenkinsPath = '';
+            if (pathParts.length > 0 && pathParts[0].includes('jenkins')) {
+              jenkinsPath = '/' + pathParts[0];
+            }
+            const jenkinsBaseUrl = url.origin + jenkinsPath;
+            const crumbUrl = jenkinsBaseUrl + '/crumbIssuer/api/json';
+            
+            const crumbResponse = await chrome.runtime.sendMessage({
+              type: 'getJenkinsCrumb',
+              url: crumbUrl
+            });
+            
+            if (crumbResponse.ok && crumbResponse.crumb) {
+              crumb = {
+                field: crumbResponse.crumb.crumbRequestField,
+                value: crumbResponse.crumb.crumb
+              };
+            }
+          } catch (crumbError) {
+            console.error('Could not get Jenkins Crumb:', crumbError);
+          }
+          
+          // Perform delete request via background script
+          const response = await chrome.runtime.sendMessage({
+            type: 'deleteBuild',
+            url: deleteUrl,
+            crumbField: crumb ? crumb.field : null,
+            crumbValue: crumb ? crumb.value : null
+          });
+          
+          // Send result back to z-report
+          event.source.postMessage({
+            type: 'deleteResponse',
+            messageId: messageId,
+            success: response.ok,
+            status: response.status,
+            statusText: response.statusText,
+            error: response.error
+          }, '*');
+        } catch (error) {
+          console.error('Error processing delete request:', error);
+          // Send error back to z-report
+          event.source.postMessage({
+            type: 'deleteResponse',
+            messageId: messageId,
+            success: false,
+            error: error.message
+          }, '*');
+        }
+      }
+    });
+    
     // Monitor URL changes (for SPA navigation)
     let lastUrl = window.location.href;
     
@@ -1325,7 +1540,6 @@
     const observer = new MutationObserver(async () => {
       const currentUrl = window.location.href;
       if (currentUrl !== lastUrl) {
-        console.log('URL changed:', currentUrl);
         lastUrl = currentUrl;
         await saveUrlVisit(currentUrl);
       }
