@@ -11,12 +11,10 @@
       <div>
         <p class="eyebrow">Jenkins Navigator</p>
         <h1 id="pageTitle">Jenkins Labels</h1>
-        <p class="subtitle" id="pageSubtitle">Loading Jenkins label data...</p>
         <p class="page-status" id="pageStatus"></p>
       </div>
       <div class="header-actions">
         <button id="refreshButton" class="secondary-btn" type="button">Refresh</button>
-        <a id="nodeLink" class="primary-link" href="#">Open Nodes</a>
       </div>
     </header>
 
@@ -24,6 +22,7 @@
       <article class="summary-card">
         <span class="summary-label">Server</span>
         <strong id="serverName">-</strong>
+        <p class="summary-meta"><a id="serverNodeLink" class="summary-link" href="#">Jenkins node url</a></p>
       </article>
       <article class="summary-card">
         <span class="summary-label">Labels</span>

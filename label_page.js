@@ -11,9 +11,8 @@ const nodeCountElement = document.getElementById('nodeCount');
 const nodeStatusSummaryElement = document.getElementById('nodeStatusSummary');
 const frequentNodesElement = document.getElementById('frequentNodes');
 const serverNameElement = document.getElementById('serverName');
-const pageSubtitle = document.getElementById('pageSubtitle');
 const pageStatus = document.getElementById('pageStatus');
-const nodeLink = document.getElementById('nodeLink');
+const serverNodeLink = document.getElementById('serverNodeLink');
 const refreshButton = document.getElementById('refreshButton');
 
 function escapeHtml(value) {
@@ -95,6 +94,7 @@ function buildNodeSummary(computers = []) {
     const nodeName = computer.displayName || 'unknown';
     const nodeLabels = Array.isArray(computer.assignedLabels) ? computer.assignedLabels.slice(1) : [];
     const offline = Boolean(computer.offline || computer.temporarilyOffline);
+    const nodeUrl = getNodeUrl(computer);
 
     if (offline) {
       summary.offline += 1;
@@ -102,11 +102,14 @@ function buildNodeSummary(computers = []) {
       summary.online += 1;
     }
 
-    nodeLabelCounts.set(nodeName, nodeLabels.length);
+    nodeLabelCounts.set(nodeName, {
+      count: nodeLabels.length,
+      url: nodeUrl
+    });
   });
 
   summary.topNodes = Array.from(nodeLabelCounts.entries())
-    .map(([name, count]) => ({ name, count }))
+    .map(([name, data]) => ({ name, count: data.count, url: data.url }))
     .sort((left, right) => {
       if (right.count !== left.count) {
         return right.count - left.count;
@@ -125,7 +128,7 @@ function renderFrequentNodes(topNodes = []) {
   }
 
   frequentNodesElement.innerHTML = topNodes.map((node, index) => (
-    `<div class="summary-list-item"><span class="summary-rank">${index + 1}.</span><span class="summary-node-name">${escapeHtml(node.name)}</span><span class="summary-node-count">${node.count}</span></div>`
+    `<div class="summary-list-item"><span class="summary-rank">${index + 1}.</span><a class="summary-node-link" href="${escapeHtml(node.url)}">${escapeHtml(node.name)}</a><span class="summary-node-count">${node.count}</span></div>`
   )).join('');
 }
 
@@ -197,10 +200,7 @@ async function fetchLabels() {
 
 function initializePage() {
   serverNameElement.textContent = serverName || 'Unknown';
-  pageSubtitle.textContent = siteUrl
-    ? `${siteUrl.replace(/\/+$/, '')}/computer/api/json based label view`
-    : 'Missing Jenkins site information';
-  nodeLink.href = siteUrl ? `${siteUrl.replace(/\/+$/, '')}/computer/` : '#';
+  serverNodeLink.href = siteUrl ? `${siteUrl.replace(/\/+$/, '')}/computer/` : '#';
 
   refreshButton.addEventListener('click', () => {
     fetchLabels();
