@@ -4,6 +4,7 @@
 let config = {};
 let previousJobUrl = ''; // ^http.*/job/.*/ 패턴과 정확히 match되는 이전 URL 저장
 let previousBuildUrl = ''; // ^http.*/job/.*/[0-9]+/ 패턴의 정확히 match되는 이전 URL 저장
+const NODE_MENU_TOGGLE_STORAGE_KEY = 'nodeMenuViewBySite';
 
 // Save URL visit history to storage
 async function saveUrlVisit(url) {
@@ -289,8 +290,22 @@ function getSelectedServer() {
   return radio ? radio.value : null;
 }
 
+async function getNodeMenuToggleUrl(server, siteUrl, menuPath) {
+  const result = await chrome.storage.local.get([NODE_MENU_TOGGLE_STORAGE_KEY]);
+  const toggleState = result[NODE_MENU_TOGGLE_STORAGE_KEY] || {};
+  const currentView = toggleState[server] === 'label' ? 'label' : 'node';
+  const targetUrl = currentView === 'node'
+    ? `${siteUrl}/${menuPath}`
+    : chrome.runtime.getURL(`label_page.html?server=${encodeURIComponent(server)}&site=${encodeURIComponent(siteUrl)}`);
+
+  toggleState[server] = currentView === 'node' ? 'label' : 'node';
+  await chrome.storage.local.set({ [NODE_MENU_TOGGLE_STORAGE_KEY]: toggleState });
+
+  return targetUrl;
+}
+
 // Handle menu button click
-function handleMenuClick(menuName, menuPath) {
+async function handleMenuClick(menuName, menuPath) {
   const server = getSelectedServer();
 
   if (!server) {
@@ -304,8 +319,9 @@ function handleMenuClick(menuName, menuPath) {
     return;
   }
 
-  // URL 구성: siteUrl + '/' + menuPath
-  const url = `${siteUrl}/${menuPath}`;
+  const url = menuName === 'node'
+    ? await getNodeMenuToggleUrl(server, siteUrl, menuPath)
+    : `${siteUrl}/${menuPath}`;
 
   console.log('Opening URL:', url);
 

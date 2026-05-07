@@ -112,4 +112,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Return true to indicate async response
     return true;
   }
+
+  if (request.type === 'getJenkinsLabels') {
+    const { url } = request;
+
+    fetch(url, {
+      credentials: 'include'
+    })
+      .then(async resp => {
+        if (!resp.ok) {
+          let errorDetail = '';
+          try {
+            errorDetail = await resp.text();
+          } catch (error) {
+            errorDetail = resp.statusText;
+          }
+          throw new Error(`HTTP ${resp.status}: ${errorDetail || resp.statusText}`);
+        }
+        return resp.json();
+      })
+      .then(data => {
+        sendResponse({ ok: true, data });
+      })
+      .catch(err => {
+        console.error('Failed to get Jenkins labels:', err);
+        sendResponse({ ok: false, error: err.toString() });
+      });
+    return true;
+  }
 });
