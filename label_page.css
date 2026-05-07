@@ -1,0 +1,251 @@
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  background:
+    radial-gradient(circle at top right, rgba(101, 145, 255, 0.16), transparent 26%),
+    linear-gradient(180deg, #f7fbff 0%, #eef4fb 100%);
+  color: #1f2d3d;
+}
+
+body {
+  min-height: 100vh;
+}
+
+.page-shell {
+  max-width: 1800px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: #3f6fb3;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 26.67px;
+}
+
+.subtitle {
+  margin: 8px 0 0;
+  color: #5e7188;
+}
+
+.page-status {
+  margin: 6px 0 0;
+  color: #5f7a60;
+  font-size: 14px;
+}
+
+.page-status.error {
+  color: #9b3d3d;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.secondary-btn,
+.primary-link {
+  border: 1px solid #9db8da;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-size: 14px;
+  text-decoration: none;
+  color: #214263;
+  background: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+}
+
+.secondary-btn:hover,
+.primary-link:hover {
+  background: rgba(227, 238, 251, 0.96);
+}
+
+.summary-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.summary-card {
+  padding: 16px;
+  border: 1px solid rgba(152, 177, 208, 0.65);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 10px 22px rgba(64, 94, 136, 0.08);
+}
+
+.summary-label {
+  display: block;
+  margin-bottom: 8px;
+  color: #6d819b;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.summary-card strong {
+  font-size: 28px;
+}
+
+.summary-meta {
+  margin: 8px 0 0;
+  color: #5f6975;
+  font-size: 13px;
+}
+
+.summary-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.summary-list-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  color: #2a415b;
+  font-size: 13px;
+}
+
+.summary-rank {
+  color: #6d819b;
+  font-weight: 700;
+}
+
+.summary-node-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-node-count {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(207, 225, 249, 0.92);
+  color: #345987;
+  font-weight: 700;
+}
+
+.summary-list-empty {
+  color: #6d819b;
+}
+
+.label-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.label-card {
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(164, 186, 214, 0.7);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 14px 28px rgba(80, 110, 150, 0.1);
+}
+
+.label-card-header {
+  display: block;
+  margin-bottom: 12px;
+}
+
+.label-card-header h2 {
+  margin: 0;
+  font-size: 14.67px;
+  word-break: break-word;
+}
+
+.label-title-link {
+  color: #1f2d3d;
+  text-decoration: none;
+}
+
+.label-title-link:hover {
+  color: #3f6fb3;
+}
+
+.label-count-pill {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(252, 243, 202, 0.98);
+  color: #8a6a1f;
+  font-size: 12px;
+}
+
+.label-count-row {
+  margin-top: 14px;
+}
+
+.node-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.node-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(225, 236, 250, 0.96);
+  color: #234160;
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.node-chip.offline {
+  background: rgba(224, 228, 233, 0.98);
+  color: #5f6975;
+}
+
+.node-chip:hover {
+  filter: brightness(1.08);
+}
+
+.empty-state {
+  padding: 40px 24px;
+  text-align: center;
+  border: 1px dashed rgba(143, 166, 196, 0.7);
+  border-radius: 20px;
+  color: #66788f;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+@media (max-width: 720px) {
+  .page-shell {
+    padding: 18px;
+  }
+
+  .page-header {
+    flex-direction: column;
+  }
+
+  .summary-row {
+    grid-template-columns: 1fr;
+  }
+}
