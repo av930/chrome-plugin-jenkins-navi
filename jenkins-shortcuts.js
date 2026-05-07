@@ -1585,28 +1585,32 @@
         `;
         
         const navButton = document.createElement('span');
-        navButton.textContent = 'Q/A/S';
+        navButton.textContent = 'Q/A/S/F';
         navButton.className = 'jenkins-shortcut-hint';
-        navButton.title = 'Q: Go to parent | A: Go back | S: Go forward';
+        navButton.title = 'Q: Go to parent | A: Go back | S: Go forward | F: Toggle shortcuts';
         navButton.style.marginLeft = '0px';
         navButton.style.marginRight = '0px';
         
-        // Handle click based on position (3 sections)
+        // Handle click based on position (4 sections)
         navButton.onclick = (e) => {
           const rect = navButton.getBoundingClientRect();
           const clickX = e.clientX - rect.left;
           const elementWidth = rect.width;
           
-          if (clickX < elementWidth / 3) {
-            // Left third: Q (parent/top)
+          if (clickX < elementWidth / 4) {
+            // First quarter: Q (parent/top)
             const event = new KeyboardEvent('keydown', { key: 'Q' });
             document.dispatchEvent(event);
-          } else if (clickX < (elementWidth * 2) / 3) {
-            // Middle third: A (back)
+          } else if (clickX < elementWidth / 2) {
+            // Second quarter: A (back)
             window.history.back();
-          } else {
-            // Right third: S (forward)
+          } else if (clickX < (elementWidth * 3) / 4) {
+            // Third quarter: S (forward)
             window.history.forward();
+          } else {
+            // Fourth quarter: F (toggle shortcuts)
+            const event = new KeyboardEvent('keydown', { key: 'F' });
+            document.dispatchEvent(event);
           }
         };
         
@@ -1633,6 +1637,18 @@
         
         // Insert before the insertion point
         if (insertionPoint.parentNode) {
+
+        const toggleButton = document.createElement('span');
+        toggleButton.textContent = 'F';
+        toggleButton.className = 'jenkins-shortcut-hint';
+        toggleButton.title = 'F: Toggle shortcuts and URL menu';
+        toggleButton.style.marginLeft = '8px';
+        toggleButton.onclick = () => {
+          const event = new KeyboardEvent('keydown', { key: 'F' });
+          document.dispatchEvent(event);
+        };
+
+        buttonContainer.appendChild(toggleButton);
           insertionPoint.parentNode.insertBefore(buttonContainer, insertionPoint);
         }
       }
