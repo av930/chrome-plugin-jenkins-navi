@@ -140,4 +140,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
     return true;
   }
+
+  if (request.type === 'openLabelPage') {
+    const { url } = request;
+    
+    chrome.tabs.create({ url: url, active: true })
+      .then(() => {
+        sendResponse({ ok: true });
+      })
+      .catch(err => {
+        console.error('Failed to open label page:', err);
+        sendResponse({ ok: false, error: err.toString() });
+      });
+    return true;
+  }
 });
