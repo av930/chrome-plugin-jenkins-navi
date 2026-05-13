@@ -21,7 +21,7 @@
   },
   // automatically added after your job url
   "job": {
-    "textlog"  : "lastBuild/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog",
+    "timelog"  : "lastBuild/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog",
     "conslog"  : "lastBuild/consoleFull",
     "env-var"  : "lastBuild/injectedEnvVars",
     "configure": "configure"
