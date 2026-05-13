@@ -281,6 +281,129 @@
     shortcutsActive = false;
   }
 
+  function isElementVisible(element) {
+    if (!element) {
+      return false;
+    }
+
+    const style = window.getComputedStyle(element);
+    return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+  }
+
+  function isSectionCollapsed(toggle, content) {
+    const details = toggle?.closest('details');
+    if (details) {
+      return !details.open;
+    }
+
+    const expanded = toggle?.getAttribute('aria-expanded');
+    if (expanded === 'false') {
+      return true;
+    }
+    if (expanded === 'true') {
+      return false;
+    }
+
+    if (!content) {
+      return false;
+    }
+
+    return !isElementVisible(content);
+  }
+
+  function isBuildExecutorStatusLabel(text = '') {
+    const normalizedText = text.trim().toLowerCase();
+    return normalizedText.includes('build executor status') || normalizedText.includes('빌드 실행 상태');
+  }
+
+  function findBuildExecutorStatusSection() {
+    const interactiveSelector = 'button, summary, a, [role="button"], [aria-controls], [aria-expanded]';
+    const toggleCandidates = Array.from(document.querySelectorAll(interactiveSelector));
+
+    for (const candidate of toggleCandidates) {
+      const relatedElements = [
+        candidate,
+        candidate.parentElement,
+        candidate.closest('details, .jenkins-section, .optionalBlock-container, .optionalBlock, .pane-frame, .section, .row, div')
+      ].filter(Boolean);
+
+      if (!relatedElements.some((element) => isBuildExecutorStatusLabel(element.textContent || ''))) {
+        continue;
+      }
+
+      const controlsId = candidate.getAttribute('aria-controls');
+      let content = controlsId ? document.getElementById(controlsId) : null;
+
+      if (!content) {
+        const container = candidate.closest('details, .jenkins-section, .optionalBlock-container, .optionalBlock, .pane-frame, .section, .row, div');
+        if (container) {
+          content = Array.from(container.children).find((child) => child !== candidate && !child.contains(candidate));
+        }
+      }
+
+      if (!content && candidate.nextElementSibling) {
+        content = candidate.nextElementSibling;
+      }
+
+      return { toggle: candidate, content };
+    }
+
+    const labelElement = Array.from(document.querySelectorAll('div, span, strong, h1, h2, h3, h4, label')).find((element) => {
+      return isBuildExecutorStatusLabel(element.textContent || '');
+    });
+    if (!labelElement) {
+      return null;
+    }
+
+    const container = labelElement.closest('details, .jenkins-section, .optionalBlock-container, .optionalBlock, .pane-frame, .section, .row, div');
+    const toggle = labelElement.closest(interactiveSelector) || container?.querySelector(interactiveSelector);
+    if (!toggle) {
+      return null;
+    }
+
+    const controlsId = toggle.getAttribute('aria-controls');
+    let content = controlsId ? document.getElementById(controlsId) : null;
+
+    if (!content && container) {
+      content = Array.from(container.children).find((child) => child !== toggle && !child.contains(toggle));
+    }
+
+    if (!content && toggle.nextElementSibling) {
+      content = toggle.nextElementSibling;
+    }
+
+    return { toggle, content };
+  }
+
+  function ensureNodeBuildExecutorStatusExpanded() {
+    if (detectPageType() !== 'node') {
+      return;
+    }
+
+    const executorsPane = document.getElementById('executors');
+    if (executorsPane?.classList.contains('collapsed')) {
+      const expandLink = executorsPane.querySelector('a[href*="toggleCollapse?paneId=executors"]');
+      if (expandLink) {
+        expandLink.click();
+        return;
+      }
+    }
+
+    const section = findBuildExecutorStatusSection();
+    if (!section) {
+      return;
+    }
+
+    if (isSectionCollapsed(section.toggle, section.content)) {
+      section.toggle.click();
+
+      const details = section.toggle.closest('details');
+      if (details && !details.open) {
+        details.open = true;
+      }
+    }
+  }
+
   function getJobBaseUrl(url = window.location.href) {
     const jobUrl = url.match(/^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*)\/?/);
     return jobUrl ? jobUrl[1].replace(/\/$/, '') : null;
@@ -1626,6 +1749,8 @@
         console.log('Not on a configured Jenkins site');
         return;
       }
+
+      ensureNodeBuildExecutorStatusExpanded();
 
       // Toggle URL menu
       if (urlMenuVisible) {
