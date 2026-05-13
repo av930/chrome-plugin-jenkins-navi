@@ -11,6 +11,7 @@
   let urlMenuVisible = false;
   let lastSavedUrl = ''; // Track last saved URL to avoid duplicates
   let actionNoticeTimer = null;
+  let breadcrumbToggleIndex = 0;
 
   // Save URL visit history to storage
   async function saveUrlVisit(url) {
@@ -402,6 +403,76 @@
         details.open = true;
       }
     }
+  }
+
+  function getBreadcrumbDropdownToggles() {
+    return Array.from(document.querySelectorAll('#breadcrumbs li.children, .jenkins-breadcrumbs li.children'))
+      .slice(0, 2)
+      .map((element) => element.querySelector('a, button, [role="button"]') || element)
+      .filter(Boolean);
+  }
+
+  function findVisibleBreadcrumbMenu() {
+    const menuSelectors = [
+      '.yuimenu',
+      '.yui-module',
+      '.tippy-box',
+      '.jenkins-dropdown',
+      '[role="menu"]'
+    ];
+
+    return Array.from(document.querySelectorAll(menuSelectors.join(', '))).find((element) => {
+      if (!isElementVisible(element)) {
+        return false;
+      }
+
+      if (element.id === 'jenkins-url-menu' || element.closest('#jenkins-url-menu')) {
+        return false;
+      }
+
+      return true;
+    }) || null;
+  }
+
+  function triggerBreadcrumbToggle(toggle) {
+    if (!toggle) {
+      return false;
+    }
+
+    ['mousedown', 'mouseup', 'click'].forEach((eventName) => {
+      toggle.dispatchEvent(new MouseEvent(eventName, {
+        bubbles: true,
+        cancelable: true,
+        view: window
+      }));
+    });
+
+    if (typeof toggle.click === 'function') {
+      toggle.click();
+    }
+
+    return true;
+  }
+
+  function toggleBreadcrumbDropdown() {
+    const toggles = getBreadcrumbDropdownToggles();
+    if (toggles.length === 0) {
+      return false;
+    }
+
+    const targetIndex = breadcrumbToggleIndex % toggles.length;
+    const openMenu = findVisibleBreadcrumbMenu();
+    if (openMenu) {
+      document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+      document.body.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    }
+
+    const triggered = triggerBreadcrumbToggle(toggles[targetIndex]);
+    if (triggered) {
+      breadcrumbToggleIndex = (targetIndex + 1) % toggles.length;
+    }
+
+    return triggered;
   }
 
   function getJobBaseUrl(url = window.location.href) {
@@ -1768,6 +1839,21 @@
       return;
     }
 
+    // W key: Toggle first and second breadcrumb dropdowns
+    if (key === 'W' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      const isJenkins = await isJenkinsSite();
+      if (!isJenkins) {
+        console.log('Not on a configured Jenkins site');
+        return;
+      }
+
+      toggleBreadcrumbDropdown();
+      return;
+    }
+
     // Navigation shortcuts
     if (shortcutsActive) {
       const handled = await navigateByShortcut(key);
@@ -1910,7 +1996,7 @@
         `;
         
         const navButton = document.createElement('span');
-        navButton.textContent = 'Q/A/S';
+        navButton.textContent = 'Q/W/A/S';
         navButton.className = 'jenkins-shortcut-hint';
         navButton.title = 'Q: Go to parent | A: Go back | S: Go forward | F: Toggle shortcuts';
         navButton.style.marginLeft = '0px';
