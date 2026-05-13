@@ -7,9 +7,10 @@
   // State management
   let shortcutsActive = false;
   let config = null;
-  let currentPageType = null; // 'job' or 'build'
+  let currentPageType = null; // 'job', 'build', or 'node'
   let urlMenuVisible = false;
   let lastSavedUrl = ''; // Track last saved URL to avoid duplicates
+  let actionNoticeTimer = null;
 
   // Save URL visit history to storage
   async function saveUrlVisit(url) {
@@ -78,9 +79,9 @@
     job: [
       { key: 'B', text: ['Build with Parameters', 'Build Now', '빌드 실행'], selector: '#side-panel a[href*="build?"], .task a[href*="build?"]' },
       { key: 'C', text: ['구성', 'Configure'], selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"]' },
-      { key: 'E', text: ['Rebuild Last'], selector: '#side-panel a[href*="rebuild"], .task a[href*="rebuild"]' },
+      //{ key: 'E', text: ['Rebuild Last'], selector: '#side-panel a[href*="rebuild"], .task a[href*="rebuild"]' },
       { key: 'H', text: ['Job Config History'], selector: '#side-panel a[href*="jobConfigHistory"], .task a[href*="jobConfigHistory"]' },
-      { key: 'R', text: ['이름 바꾸기', 'Rename'], selector: '#side-panel a[href$="/confirm-rename"], .task a[href$="/confirm-rename"]' }
+      { key: 'R', text: ['Retrigger Last', 'Retrigger/Retry/Rebuild Last'], selector: null }
     ],
     build: [
       { key: 'D', text: ['Delete build', '빌드 삭제'], selector: '#side-panel a[href*="doDelete"], .task a[href*="doDelete"]' },
@@ -90,6 +91,15 @@
       { key: 'B', text: ['Rebuild', '다시 빌드'], selector: '#side-panel a[href*="rebuild"], .task a[href*="rebuild"]' },
       { key: 'G', text: ['Retrigger'], selector: '#side-panel a[href*="retrigger"], .task a[href*="retrigger"]' },
       { key: 'P', text: ['Parameters'], selector: '#side-panel a[href*="parameters"], .task a[href*="parameters"]' }
+    ],
+    node: [
+      { key: 'C', text: ['구성', 'Configure'], selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"]' },
+      { key: 'D', text: ['Disconnect'], selector: '#side-panel a[href*="toggleOffline"], .task a[href*="toggleOffline"]' },
+      { key: 'B', text: ['Build History'], selector: '#side-panel a[href*="builds"], .task a[href*="builds"]' },
+      { key: 'S', text: ['System Information'], selector: '#side-panel a[href*="systemInfo"], .task a[href*="systemInfo"]' },
+      { key: 'H', text: ['Agent Config History'], selector: '#side-panel a[href*="nodeConfigHistory"], .task a[href*="nodeConfigHistory"]' },
+      { key: 'L', text: ['Log'], selector: '#side-panel a[href*="log"], .task a[href*="log"]' },
+      { key: 'O', text: ['Load Statistics'], selector: '#side-panel a[href*="loadStatistics"], .task a[href*="loadStatistics"]' }
     ]
   };
 
@@ -125,6 +135,11 @@
   // Detect current page type (job or build)
   function detectPageType() {
     const url = window.location.href;
+
+    // Node page pattern: /computer/nodename/
+    if (/\/computer\/[^\/]+\/?($|#|configure|builds|systemInfo)/.test(url)) {
+      return 'node';
+    }
     
     // Build page pattern: /job/jobname/buildnumber/ (supports nested jobs like /job/folder/job/name/123/)
     if (/\/job\/[^\/]+(\/job\/[^\/]+)*\/\d+\/?/.test(url)) {
@@ -195,10 +210,14 @@
 
     shortcutsActive = true;
     
-    // Show z-report button if on job page
+    // Show context action buttons
     const reportButton = document.getElementById('jenkins-report-button');
     if (reportButton) {
       reportButton.style.display = 'inline-block';
+    }
+    const labelButton = document.getElementById('jenkins-label-button');
+    if (labelButton) {
+      labelButton.style.display = 'inline-block';
     }
 
     // Add shortcut hints to each menu item
@@ -249,17 +268,224 @@
       }
     });
     
-    // Hide z-report button
+    // Hide context action buttons
     const reportButton = document.getElementById('jenkins-report-button');
     if (reportButton) {
       reportButton.style.display = 'none';
+    }
+    const labelButton = document.getElementById('jenkins-label-button');
+    if (labelButton) {
+      labelButton.style.display = 'none';
     }
 
     shortcutsActive = false;
   }
 
+  function getJobBaseUrl(url = window.location.href) {
+    const jobUrl = url.match(/^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*)\/?/);
+    return jobUrl ? jobUrl[1].replace(/\/$/, '') : null;
+  }
+
+  function resolveActionUrl(link, baseUrl) {
+    const href = link?.getAttribute('href');
+    return href ? new URL(href, baseUrl).href : null;
+  }
+
+  function showActionNotice(message) {
+    const existingNotice = document.getElementById('jenkins-action-notice');
+    if (existingNotice) {
+      existingNotice.remove();
+    }
+
+    if (actionNoticeTimer) {
+      clearTimeout(actionNoticeTimer);
+      actionNoticeTimer = null;
+    }
+
+    const notice = document.createElement('div');
+    notice.id = 'jenkins-action-notice';
+    notice.textContent = message;
+    notice.style.cssText = `
+      position: fixed;
+      top: 18px;
+      right: 18px;
+      z-index: 10001;
+      padding: 10px 14px;
+      background: rgba(20, 20, 20, 0.9);
+      color: #fff;
+      border-radius: 6px;
+      font-size: 13px;
+      font-family: Arial, sans-serif;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    `;
+    document.body.appendChild(notice);
+
+    actionNoticeTimer = window.setTimeout(() => {
+      notice.remove();
+      actionNoticeTimer = null;
+    }, 1000);
+  }
+
+  function navigateWithNotice(url, message) {
+    showActionNotice(message);
+    hideShortcuts();
+    window.setTimeout(() => {
+      window.location.href = url;
+    }, 1000);
+    return true;
+  }
+
+  function hasDirectShortcut(pageType, keyUpper) {
+    return Boolean(SHORTCUTS[pageType]?.some(shortcut => shortcut.key.toUpperCase() === keyUpper));
+  }
+
+  function getMatchedSiteInfo(url = window.location.href) {
+    const sites = config?.sites || {};
+    const normalizedUrl = url.replace(/^https?:\/\//i, '');
+
+    for (const [siteName, siteUrl] of Object.entries(sites)) {
+      const normalizedSiteUrl = String(siteUrl).replace(/^https?:\/\//i, '').replace(/\/$/, '');
+      if (normalizedUrl.startsWith(normalizedSiteUrl)) {
+        return {
+          server: siteName,
+          siteUrl: String(siteUrl).replace(/\/$/, '')
+        };
+      }
+    }
+
+    const originMatch = url.match(/^(https?:\/\/[^\/]+(?:\/[^\/]+)?)/i);
+    if (originMatch) {
+      const siteUrl = originMatch[1].replace(/\/$/, '');
+      return {
+        server: siteUrl.split('/').pop() || 'Jenkins',
+        siteUrl
+      };
+    }
+
+    return null;
+  }
+
+  function findShortcutLinkByConfig(shortcut) {
+    let link = null;
+    if (shortcut.selector) {
+      link = document.querySelector(shortcut.selector);
+    }
+
+    if (!link) {
+      const allLinks = document.querySelectorAll('#side-panel a, .task a, #tasks a');
+      for (const a of allLinks) {
+        const text = a.textContent.trim();
+        if (shortcut.text.some(t => text.includes(t))) {
+          link = a;
+          break;
+        }
+      }
+    }
+
+    return link;
+  }
+
+  function activateLink(link) {
+    if (!link) {
+      return false;
+    }
+
+    if (link.onclick) {
+      try {
+        const result = link.onclick.call(link, new MouseEvent('click'));
+        if (result === false) {
+          hideShortcuts();
+          return true;
+        }
+      } catch (e) {
+        // Ignore onclick errors
+      }
+    }
+
+    if (link.href && link.href !== '#' && link.href !== 'javascript:void(0)') {
+      window.location.href = link.href;
+    } else {
+      link.click();
+    }
+
+    hideShortcuts();
+    return true;
+  }
+
+  async function triggerNodeLabels() {
+    if (!config) {
+      try {
+        const result = await chrome.storage.local.get(['userConfigText']);
+        if (result.userConfigText) {
+          config = JSON.parse(result.userConfigText);
+        }
+      } catch (error) {
+        console.error('Failed to load config for Jenkins Labels:', error);
+      }
+    }
+
+    const siteInfo = getMatchedSiteInfo();
+    if (!siteInfo?.siteUrl) {
+      console.log('Could not determine Jenkins site for Jenkins Labels');
+      return false;
+    }
+
+    const labelPageUrl = chrome.runtime.getURL(
+      `label_page.html?server=${encodeURIComponent(siteInfo.server)}&site=${encodeURIComponent(siteInfo.siteUrl)}`
+    );
+
+    hideShortcuts();
+    
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'openLabelPage',
+        url: labelPageUrl
+      });
+    } catch (error) {
+      console.error('Failed to open Jenkins Labels page:', error);
+    }
+    
+    return true;
+  }
+
+  async function navigateToLastBuildRetryOrRebuild() {
+    const jobBaseUrl = getJobBaseUrl();
+    if (!jobBaseUrl) {
+      return false;
+    }
+
+    const lastBuildUrl = `${jobBaseUrl}/lastBuild/`;
+    const rebuildFallbackUrl = `${lastBuildUrl}rebuild/parameterized`;
+
+    try {
+      const response = await fetch(lastBuildUrl, { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error(`Failed to load lastBuild page: ${response.status}`);
+      }
+
+      const html = await response.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const retriggerLink = doc.querySelector('#side-panel a[href*="retrigger"], .task a[href*="retrigger"], #tasks a[href*="retrigger"]');
+      const retriggerUrl = resolveActionUrl(retriggerLink, lastBuildUrl);
+      if (retriggerUrl) {
+        return navigateWithNotice(retriggerUrl, 'Executed via Retrigger');
+      }
+
+      const retryLink = doc.querySelector('#side-panel a[href*="retry"], .task a[href*="retry"], #tasks a[href*="retry"]');
+      const retryUrl = resolveActionUrl(retryLink, lastBuildUrl);
+
+      if (retryUrl) {
+        return navigateWithNotice(retryUrl, 'Executed via Retry');
+      }
+    } catch (error) {
+      console.log('Failed to inspect lastBuild retry action, falling back to rebuild:', error);
+    }
+
+    return navigateWithNotice(rebuildFallbackUrl, 'Retrigger/Retry unavailable. Executed via Rebuild');
+  }
+
   // Navigate to menu by shortcut key
-  function navigateByShortcut(key) {
+  async function navigateByShortcut(key) {
     if (!shortcutsActive) return false;
 
     const pageType = currentPageType;
@@ -267,8 +493,12 @@
 
     const keyUpper = key.toUpperCase();
 
-    // Special handling for H - Job Config History (always available)
-    if (keyUpper === 'H') {
+    if (pageType === 'job' && keyUpper === 'R') {
+      return navigateToLastBuildRetryOrRebuild();
+    }
+
+    // Special handling for H - Job Config History
+    if (pageType === 'job' && keyUpper === 'H') {
       const currentUrl = window.location.href;
       const jobUrl = currentUrl.match(/^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*)\//);
       if (jobUrl) {
@@ -277,6 +507,10 @@
         hideShortcuts();
         return true;
       }
+    }
+
+    if (pageType === 'node' && keyUpper === 'Z') {
+      return await triggerNodeLabels();
     }
 
     // Special handling for C and T on build page
@@ -307,52 +541,10 @@
     
     console.log(`Found shortcut for ${keyUpper}:`, shortcut);
 
-    // Find the link by selector first (skip if selector is null)
-    let link = null;
-    if (shortcut.selector) {
-      link = document.querySelector(shortcut.selector);
-      console.log(`Selector result for ${keyUpper}:`, link);
-    }
-    
-    // If not found by selector, try to find by text content
-    if (!link) {
-      const allLinks = document.querySelectorAll('#side-panel a, .task a');
-      for (const a of allLinks) {
-        const text = a.textContent.trim();
-        if (shortcut.text.some(t => text.includes(t))) {
-          link = a;
-          console.log(`Found ${keyUpper} by text match:`, text);
-          break;
-        }
-      }
-    }
-
+    const link = findShortcutLinkByConfig(shortcut);
     if (link) {
       console.log('Navigating to:', link.href);
-      
-      // For links with onclick handlers, trigger the onclick first
-      if (link.onclick) {
-        try {
-          const result = link.onclick.call(link, new MouseEvent('click'));
-          // If onclick returns false, don't navigate
-          if (result === false) {
-            hideShortcuts();
-            return true;
-          }
-        } catch (e) {
-          // Ignore onclick errors
-        }
-      }
-      
-      // Use direct navigation instead of click() to bypass event handlers
-      if (link.href && link.href !== '#' && link.href !== 'javascript:void(0)') {
-        window.location.href = link.href;
-      } else {
-        link.click();
-      }
-      
-      hideShortcuts();
-      return true;
+      return activateLink(link);
     }
 
     console.log('Link not found for shortcut:', key);
@@ -1314,6 +1506,10 @@
 
     // S key: Go forward to next page
     if (key === 'S' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      const pageType = detectPageType();
+      if (shortcutsActive && hasDirectShortcut(pageType, key)) {
+        // Let the page shortcut handle this key.
+      } else {
       event.preventDefault();
       
       // Check if on a Jenkins site
@@ -1326,6 +1522,7 @@
       console.log('Going forward to next page');
       window.history.forward();
       return;
+      }
     }
 
     // Z key: Show build statistics report (only on job pages and when shortcuts are active)
@@ -1345,10 +1542,12 @@
         return;
       }
       
-      // Check if on a job page
+      // Check current page type
       const pageType = detectPageType();
       if (pageType === 'job') {
         await showStatisticsReport();
+      } else if (pageType === 'node') {
+        await triggerNodeLabels();
       }
       return;
     }
@@ -1419,6 +1618,7 @@
     // F key: Toggle shortcuts display and URL menu
     if (key === 'F' && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault();
+      event.stopImmediatePropagation();
       
       // Check if on a Jenkins site
       const isJenkins = await isJenkinsSite();
@@ -1445,7 +1645,7 @@
 
     // Navigation shortcuts
     if (shortcutsActive) {
-      const handled = navigateByShortcut(key);
+      const handled = await navigateByShortcut(key);
       if (handled) {
         event.preventDefault();
       }
@@ -1466,8 +1666,8 @@
     // Save current URL on page load
     await saveUrlVisit(window.location.href);
 
-    // Add keyboard event listener
-    document.addEventListener('keydown', handleKeyPress);
+    // Add keyboard event listener (capture phase to handle before Jenkins)
+    document.addEventListener('keydown', handleKeyPress, { capture: true });
     
     // Listen for delete requests from z-report window
     window.addEventListener('message', async (event) => {
@@ -1585,7 +1785,7 @@
         `;
         
         const navButton = document.createElement('span');
-        navButton.textContent = 'Q/A/S/F';
+        navButton.textContent = 'Q/A/S';
         navButton.className = 'jenkins-shortcut-hint';
         navButton.title = 'Q: Go to parent | A: Go back | S: Go forward | F: Toggle shortcuts';
         navButton.style.marginLeft = '0px';
@@ -1616,7 +1816,7 @@
         
         buttonContainer.appendChild(navButton);
         
-        // Add Z-report button only on job pages (hidden initially)
+        // Add page-specific action button (hidden initially)
         const pageType = detectPageType();
         if (pageType === 'job') {
           const reportButton = document.createElement('span');
@@ -1633,6 +1833,21 @@
           };
           
           buttonContainer.appendChild(reportButton);
+        } else if (pageType === 'node') {
+          const labelButton = document.createElement('span');
+          labelButton.textContent = 'z-label';
+          labelButton.className = 'jenkins-shortcut-hint';
+          labelButton.id = 'jenkins-label-button';
+          labelButton.title = 'Press Z for Jenkins Labels';
+          labelButton.style.marginLeft = '8px';
+          labelButton.style.cursor = 'pointer';
+          labelButton.style.display = 'none';
+
+          labelButton.onclick = async () => {
+            await triggerNodeLabels();
+          };
+
+          buttonContainer.appendChild(labelButton);
         }
         
         // Insert before the insertion point

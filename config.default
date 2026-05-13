@@ -21,10 +21,10 @@
   },
   // automatically added after your job url
   "job": {
-    "textlog": "lastBuild/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog",
-    "conslog": "lastBuild/consoleFull",
-    "env-var": "lastBuild/injectedEnvVars",
-    "rebuild": "lastBuild/rebuild/parameterized"
+    "textlog"  : "lastBuild/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog",
+    "conslog"  : "lastBuild/consoleFull",
+    "env-var"  : "lastBuild/injectedEnvVars",
+    "configure": "configure"
   },
   // add your job frequently visited  
   "custom": {
