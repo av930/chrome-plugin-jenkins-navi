@@ -13,6 +13,12 @@
   let actionNoticeTimer = null;
   let breadcrumbToggleIndex = 0;
 
+  const JOB_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*)\/?/;
+  const BUILD_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*\/\d+)\/?/;
+  const SYNTHETIC_SHORTCUT_MENU_SELECTOR = '[data-jenkins-synthetic-shortcut]';
+  const TIMESTAMPS_PATH = '/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog';
+  const STICKY_SHORTCUTS_STORAGE_KEY = 'jenkinsShortcutsSticky';
+
   // Save URL visit history to storage
   async function saveUrlVisit(url) {
     if (!url || !url.includes('jenkins')) return;
@@ -76,33 +82,41 @@
   }
 
   // Shortcut mappings for different page types
-  const SHORTCUTS = {
-    job: [
-      { key: 'B', text: ['Build with Parameters', 'Build Now', '빌드 실행'], selector: '#side-panel a[href*="build?"], .task a[href*="build?"]' },
-      { key: 'C', text: ['구성', 'Configure'], selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"]' },
-      //{ key: 'E', text: ['Rebuild Last'], selector: '#side-panel a[href*="rebuild"], .task a[href*="rebuild"]' },
-      { key: 'H', text: ['Job Config History'], selector: '#side-panel a[href*="jobConfigHistory"], .task a[href*="jobConfigHistory"]' },
-      { key: 'R', text: ['Retrigger Last', 'Retrigger/Retry/Rebuild Last'], selector: null }
-    ],
-    build: [
-      { key: 'D', text: ['Delete build', '빌드 삭제'], selector: '#side-panel a[href*="doDelete"], .task a[href*="doDelete"]' },
-      { key: 'C/T', text: ['Console Output', '콘솔 출력'], selector: '#side-panel a[href*="/console"], .task a[href*="/console"]', isSpecial: true },
-      { key: 'E', text: ['Environment Variables'], selector: '#side-panel a[href*="injectedEnvVars"], .task a[href*="injectedEnvVars"]' },
-      { key: 'R', text: ['Retry'], selector: '#side-panel a[href*="retry"], .task a[href*="retry"]' },
-      { key: 'B', text: ['Rebuild', '다시 빌드'], selector: '#side-panel a[href*="rebuild"], .task a[href*="rebuild"]' },
-      { key: 'G', text: ['Retrigger'], selector: '#side-panel a[href*="retrigger"], .task a[href*="retrigger"]' },
-      { key: 'P', text: ['Parameters'], selector: '#side-panel a[href*="parameters"], .task a[href*="parameters"]' }
-    ],
-    node: [
-      { key: 'C', text: ['구성', 'Configure'], selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"]' },
-      { key: 'D', text: ['Disconnect'], selector: '#side-panel a[href*="toggleOffline"], .task a[href*="toggleOffline"]' },
-      { key: 'B', text: ['Build History'], selector: '#side-panel a[href*="builds"], .task a[href*="builds"]' },
-      { key: 'S', text: ['System Information'], selector: '#side-panel a[href*="systemInfo"], .task a[href*="systemInfo"]' },
-      { key: 'H', text: ['Agent Config History'], selector: '#side-panel a[href*="nodeConfigHistory"], .task a[href*="nodeConfigHistory"]' },
-      { key: 'L', text: ['Log'], selector: '#side-panel a[href*="log"], .task a[href*="log"]' },
-      { key: 'O', text: ['Load Statistics'], selector: '#side-panel a[href*="loadStatistics"], .task a[href*="loadStatistics"]' }
-    ]
-  };
+  const SHORTCUTS = [
+    { pageType: 'job', key: 'B', text: ['Build with Parameters', 'Build Now', '빌드 실행'], selector: '#side-panel a[href*="build?"], .task a[href*="build?"]' },
+    //{ pageType: 'job', key: 'E', text: ['Rebuild Last'], selector: '#side-panel a[href*="rebuild"], .task a[href*="rebuild"]' },
+    { pageType: 'job', key: 'R', text: ['Retrigger Last', 'Retrigger/Retry/Rebuild Last'], selector: null },
+    { pageType: 'build', key: 'D', text: ['Delete build', '빌드 삭제'], selector: '#side-panel a[href*="doDelete"], .task a[href*="doDelete"]' },
+    { pageType: 'build', key: 'C/T', text: ['Console Output', '콘솔 출력'], selector: '#side-panel a[href*="/console"], .task a[href*="/console"]', isSpecial: true },
+    { pageType: 'build', key: 'E', text: ['Environment Variables'], selector: '#side-panel a[href*="injectedEnvVars"], .task a[href*="injectedEnvVars"]' },
+    { pageType: 'build', key: 'G', text: ['Retrigger'], selector: '#side-panel a[href*="retrigger"], .task a[href*="retrigger"]' },
+    { pageType: 'node', key: 'X', text: ['구성', 'Configure'], selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"]' },
+    { pageType: 'node', key: 'D', text: ['Disconnect'], selector: '#side-panel a[href*="toggleOffline"], .task a[href*="toggleOffline"]' },
+    { pageType: 'node', key: 'B', text: ['Build History'], selector: '#side-panel a[href*="builds"], .task a[href*="builds"]' },
+    { pageType: 'node', key: 'S', text: ['System Information'], selector: '#side-panel a[href*="systemInfo"], .task a[href*="systemInfo"]' },
+    { pageType: 'node', key: 'H', text: ['Agent Config History'], selector: '#side-panel a[href*="nodeConfigHistory"], .task a[href*="nodeConfigHistory"]' },
+    { pageType: 'node', key: 'L', text: ['Log'], selector: '#side-panel a[href*="log"], .task a[href*="log"]' }
+  ];
+
+  function getShortcutsForPageType(pageType) {
+    return SHORTCUTS.filter(shortcut => shortcut.pageType === pageType);
+  }
+
+  function getStickyShortcutsEnabled() {
+    try {
+      return window.sessionStorage.getItem(STICKY_SHORTCUTS_STORAGE_KEY) === 'true';
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function setStickyShortcutsEnabled(enabled) {
+    try {
+      window.sessionStorage.setItem(STICKY_SHORTCUTS_STORAGE_KEY, enabled ? 'true' : 'false');
+    } catch (error) {
+      // Ignore sessionStorage failures.
+    }
+  }
 
   // Detect if current page is a Jenkins site (based on configured sites)
   async function isJenkinsSite() {
@@ -136,6 +150,7 @@
   // Detect current page type (job or build)
   function detectPageType() {
     const url = window.location.href;
+    const { jobBaseUrl, buildBaseUrl } = getJenkinsUrlParts(url);
 
     // Node page pattern: /computer/nodename/
     if (/\/computer\/[^\/]+\/?($|#|configure|builds|systemInfo)/.test(url)) {
@@ -143,13 +158,12 @@
     }
     
     // Build page pattern: /job/jobname/buildnumber/ (supports nested jobs like /job/folder/job/name/123/)
-    if (/\/job\/[^\/]+(\/job\/[^\/]+)*\/\d+\/?/.test(url)) {
+    if (buildBaseUrl) {
       return 'build';
     }
     
-    // Job page pattern: /job/jobname/ or /job/folder/job/jobname/ (supports nested folders)
-    // Matches ending with / or #hash or buildTimeTrend, changes, builds
-    if (/\/job\/[^\/]+(\/job\/[^\/]+)*\/?($|#|buildTimeTrend|changes|builds)/.test(url)) {
+    // Treat any non-build Jenkins job URL as a job page, including action URLs such as /build?delay=0sec.
+    if (jobBaseUrl) {
       return 'job';
     }
     
@@ -162,7 +176,8 @@
     if (!pageType) return [];
 
     currentPageType = pageType;
-    const shortcuts = SHORTCUTS[pageType];
+    const syntheticMenuLinks = ensureSyntheticShortcutMenuItems(pageType);
+    const shortcuts = getShortcutsForPageType(pageType);
     const foundLinks = [];
 
     shortcuts.forEach(shortcut => {
@@ -197,6 +212,12 @@
       }
     });
 
+    syntheticMenuLinks.forEach((item) => {
+      if (!foundLinks.some(existingItem => existingItem.key === item.key)) {
+        foundLinks.push(item);
+      }
+    });
+
     return foundLinks;
   }
 
@@ -204,12 +225,19 @@
   function showShortcuts() {
     if (shortcutsActive) return;
 
-    const links = findMenuLinks();
-    if (links.length === 0) {
+    const pageType = detectPageType();
+    if (!pageType) {
       return;
     }
 
+    currentPageType = pageType;
+    const links = findMenuLinks();
     shortcutsActive = true;
+    setStickyShortcutsEnabled(true);
+
+    if (links.length === 0) {
+      return;
+    }
     
     // Show context action buttons
     const reportButton = document.getElementById('jenkins-report-button');
@@ -258,7 +286,9 @@
 
 
   // Hide keyboard shortcuts hints
-  function hideShortcuts() {
+  function hideShortcuts(options = {}) {
+    const { clearSticky = false } = options;
+
     if (!shortcutsActive) return;
 
     const hints = document.querySelectorAll('.jenkins-shortcut-hint');
@@ -279,7 +309,13 @@
       labelButton.style.display = 'none';
     }
 
+    removeSyntheticShortcutMenuItems();
+
     shortcutsActive = false;
+
+    if (clearSticky) {
+      setStickyShortcutsEnabled(false);
+    }
   }
 
   function isElementVisible(element) {
@@ -475,9 +511,452 @@
     return triggered;
   }
 
+  function getJenkinsUrlParts(url = window.location.href) {
+    const buildMatch = url.match(BUILD_BASE_URL_PATTERN);
+    const jobMatch = url.match(JOB_BASE_URL_PATTERN);
+
+    return {
+      jobBaseUrl: jobMatch ? jobMatch[1].replace(/\/$/, '') : null,
+      buildBaseUrl: buildMatch ? buildMatch[1].replace(/\/$/, '') : null
+    };
+  }
+
   function getJobBaseUrl(url = window.location.href) {
-    const jobUrl = url.match(/^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*)\/?/);
-    return jobUrl ? jobUrl[1].replace(/\/$/, '') : null;
+    return getJenkinsUrlParts(url).jobBaseUrl;
+  }
+
+  function getBuildBaseUrl(url = window.location.href) {
+    return getJenkinsUrlParts(url).buildBaseUrl;
+  }
+
+  async function getLastBuildInfo(url = window.location.href) {
+    const jobBaseUrl = getJobBaseUrl(url);
+    if (!jobBaseUrl) {
+      return null;
+    }
+
+    try {
+      const response = await fetch(`${jobBaseUrl}/api/json?tree=lastBuild[number,url]`, { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error(`Failed to load last build info: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const buildNumber = Number(data?.lastBuild?.number);
+      if (!buildNumber) {
+        return null;
+      }
+
+      const buildBaseUrl = String(data?.lastBuild?.url || `${jobBaseUrl}/${buildNumber}`).replace(/\/$/, '');
+      return {
+        jobBaseUrl,
+        buildNumber,
+        buildBaseUrl
+      };
+    } catch (error) {
+      console.log('Failed to resolve last build info:', error);
+      return null;
+    }
+  }
+
+  function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function getJenkinsSiteUrl(url = window.location.href) {
+    const siteInfo = getMatchedSiteInfo(url);
+    if (siteInfo?.siteUrl) {
+      return siteInfo.siteUrl;
+    }
+
+    const originMatch = String(url).match(/^(https?:\/\/[^\/]+(?:\/[^\/]+)?)/i);
+    return originMatch ? originMatch[1].replace(/\/$/, '') : null;
+  }
+
+  function getNodeUrlFromName(nodeName, siteUrl) {
+    const normalizedNodeName = String(nodeName || '').trim();
+    if (!normalizedNodeName || !siteUrl) {
+      return null;
+    }
+
+    const lowerNodeName = normalizedNodeName.toLowerCase();
+    if (['built-in node', 'built in node', '(built-in)', 'master', '(master)'].includes(lowerNodeName)) {
+      const builtInPath = lowerNodeName.includes('master') ? '(master)' : '(built-in)';
+      return `${siteUrl}/computer/${encodeURIComponent(builtInPath)}/`;
+    }
+
+    return `${siteUrl}/computer/${encodeURIComponent(normalizedNodeName)}/`;
+  }
+
+  function getBuildInfoFromCurrentUrl(url = window.location.href) {
+    const buildBaseUrl = getBuildBaseUrl(url);
+    const buildNumber = getCurrentBuildNumber(url);
+    const jobBaseUrl = getJobBaseUrl(url);
+
+    if (!buildBaseUrl || !buildNumber || !jobBaseUrl) {
+      return null;
+    }
+
+    return {
+      buildBaseUrl,
+      buildNumber,
+      jobBaseUrl
+    };
+  }
+
+  function navigateToJobConfigure() {
+    const jobBaseUrl = getJobBaseUrl();
+    if (!jobBaseUrl) {
+      return false;
+    }
+
+    hideShortcuts();
+    window.location.href = `${jobBaseUrl}/configure`;
+    return true;
+  }
+
+  function navigateToJobHistory() {
+    const jobBaseUrl = getJobBaseUrl();
+    if (!jobBaseUrl) {
+      return false;
+    }
+
+    hideShortcuts();
+    window.location.href = `${jobBaseUrl}/jobConfigHistory`;
+    return true;
+  }
+
+  async function getTargetBuildBaseUrl(url = window.location.href) {
+    const currentBuildInfo = getBuildInfoFromCurrentUrl(url);
+    if (currentBuildInfo?.buildBaseUrl) {
+      return currentBuildInfo.buildBaseUrl;
+    }
+
+    const lastBuildInfo = await getLastBuildInfo(url);
+    return lastBuildInfo?.buildBaseUrl || null;
+  }
+
+  async function getConsoleToggleUrl(keyUpper, url = window.location.href) {
+    const targetBuildBaseUrl = await getTargetBuildBaseUrl(url);
+    if (!targetBuildBaseUrl) {
+      return null;
+    }
+
+    const buildUrlPattern = escapeRegExp(targetBuildBaseUrl);
+
+    if (keyUpper === 'C') {
+      if (new RegExp(`^${buildUrlPattern}/consoleFull/?(?:[?#].*)?$`, 'i').test(url)) {
+        return `${targetBuildBaseUrl}/console`;
+      }
+
+      if (new RegExp(`^${buildUrlPattern}/console/?(?:[?#].*)?$`, 'i').test(url)) {
+        return `${targetBuildBaseUrl}/consoleFull`;
+      }
+
+      return `${targetBuildBaseUrl}/console`;
+    }
+
+    if (keyUpper === 'T') {
+      if (new RegExp(`^${buildUrlPattern}/consoleText/?(?:[?#].*)?$`, 'i').test(url)) {
+        return `${targetBuildBaseUrl}${TIMESTAMPS_PATH}`;
+      }
+
+      if (new RegExp(`^${buildUrlPattern}/timestamps/?(?:[?#].*)?$`, 'i').test(url)) {
+        return `${targetBuildBaseUrl}/consoleText`;
+      }
+
+      return `${targetBuildBaseUrl}/consoleText`;
+    }
+
+    return null;
+  }
+
+  async function navigateToConsoleShortcut(keyUpper) {
+    const targetUrl = await getConsoleToggleUrl(keyUpper);
+    if (!targetUrl) {
+      return false;
+    }
+
+    hideShortcuts();
+    window.location.href = targetUrl;
+    return true;
+  }
+
+  async function getTargetBuildInfo(url = window.location.href) {
+    return getBuildInfoFromCurrentUrl(url) || await getLastBuildInfo(url);
+  }
+
+  async function getBuildNodeUrl(url = window.location.href) {
+    const targetBuildInfo = await getTargetBuildInfo(url);
+    if (!targetBuildInfo?.buildBaseUrl) {
+      return null;
+    }
+
+    const buildUrl = `${targetBuildInfo.buildBaseUrl}/`;
+    const siteUrl = getJenkinsSiteUrl(targetBuildInfo.buildBaseUrl) || targetBuildInfo.jobBaseUrl;
+
+    try {
+      const response = await fetch(`${targetBuildInfo.buildBaseUrl}/api/json?tree=builtOn,builtOnStr`, { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error(`Failed to load build node info: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const nodeUrl = getNodeUrlFromName(data?.builtOn || data?.builtOnStr, siteUrl);
+      if (!nodeUrl) {
+        throw new Error('Build node is missing in API response');
+      }
+
+      return nodeUrl;
+    } catch (error) {
+      console.log('Failed to resolve build node info from API, falling back to build page:', error);
+    }
+
+    try {
+      const response = await fetch(buildUrl, { credentials: 'include' });
+      if (!response.ok) {
+        throw new Error(`Failed to load build page: ${response.status}`);
+      }
+
+      const html = await response.text();
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const nodeLink = doc.querySelector('#builtOn a[href*="/computer/"], a[href*="/computer/"], a.model-link[href*="/computer/"]');
+      const nodeUrl = resolveActionUrl(nodeLink, buildUrl);
+      if (nodeUrl) {
+        return nodeUrl.replace(/#.*$/, '');
+      }
+
+      const pageText = doc.body?.textContent || '';
+      const builtOnMatch = pageText.match(/built\s+on\s+([^\n\r]+)/i);
+      if (builtOnMatch?.[1]) {
+        return getNodeUrlFromName(builtOnMatch[1].trim(), siteUrl);
+      }
+
+      return getNodeUrlFromName('built-in node', siteUrl);
+    } catch (error) {
+      console.log('Failed to resolve build node info from build page:', error);
+      return null;
+    }
+  }
+
+  async function navigateToBuildNode() {
+    const nodeUrl = await getBuildNodeUrl();
+    if (!nodeUrl) {
+      showActionNotice('node not found');
+      return true;
+    }
+
+    hideShortcuts();
+    window.location.href = nodeUrl;
+    return true;
+  }
+
+  function getCurrentBuildNumber(url = window.location.href) {
+    const buildBaseUrl = getBuildBaseUrl(url);
+    if (!buildBaseUrl) {
+      return null;
+    }
+
+    const buildNumberMatch = buildBaseUrl.match(/\/(\d+)$/);
+    return buildNumberMatch ? Number(buildNumberMatch[1]) : null;
+  }
+
+  function getBuildRelativeSuffix(url = window.location.href) {
+    const buildBaseUrl = getBuildBaseUrl(url);
+    if (!buildBaseUrl) {
+      return '';
+    }
+
+    return url.slice(buildBaseUrl.length);
+  }
+
+  async function navigateToPreviousOrNextBuild(keyUpper) {
+    const pageType = detectPageType();
+
+    if (pageType === 'job') {
+      const lastBuildInfo = await getLastBuildInfo();
+      if (!lastBuildInfo?.buildBaseUrl) {
+        return false;
+      }
+
+      hideShortcuts();
+      window.location.href = `${lastBuildInfo.buildBaseUrl}/console`;
+      return true;
+    }
+
+    if (pageType !== 'build') {
+      return false;
+    }
+
+    const jobBaseUrl = getJobBaseUrl();
+    const currentBuildNumber = getCurrentBuildNumber();
+    if (!jobBaseUrl || !currentBuildNumber) {
+      return false;
+    }
+
+    if (keyUpper === 'N') {
+      const lastBuildInfo = await getLastBuildInfo();
+      if (lastBuildInfo?.buildNumber && currentBuildNumber >= lastBuildInfo.buildNumber) {
+        showActionNotice('current is last build');
+        return true;
+      }
+    }
+
+    const nextBuildNumber = keyUpper === 'P' ? currentBuildNumber - 1 : currentBuildNumber + 1;
+    if (nextBuildNumber <= 0) {
+      return false;
+    }
+
+    const relativeSuffix = getBuildRelativeSuffix();
+    hideShortcuts();
+    window.location.href = `${jobBaseUrl}/${nextBuildNumber}${relativeSuffix}`;
+    return true;
+  }
+
+  function getShortcutMenuContainer() {
+    return document.getElementById('tasks') || document.querySelector('#side-panel .tasks') || document.getElementById('side-panel');
+  }
+
+  function findExistingJobMenuLink(action) {
+    const definitions = {
+      configure: {
+        selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"], #tasks a[href$="/configure"]',
+        text: ['구성', 'Configure']
+      },
+      history: {
+        selector: '#side-panel a[href*="jobConfigHistory"], .task a[href*="jobConfigHistory"], #tasks a[href*="jobConfigHistory"]',
+        text: ['Job Config History', 'History']
+      }
+    };
+
+    const definition = definitions[action];
+    if (!definition) {
+      return null;
+    }
+
+    const directLink = document.querySelector(definition.selector);
+    if (directLink) {
+      return directLink;
+    }
+
+    const allLinks = document.querySelectorAll('#side-panel a, .task a, #tasks a');
+    for (const link of allLinks) {
+      const text = link.textContent.trim();
+      if (definition.text.some(value => text.includes(value))) {
+        return link;
+      }
+    }
+
+    return null;
+  }
+
+  function removeSyntheticShortcutMenuItems() {
+    document.querySelectorAll(SYNTHETIC_SHORTCUT_MENU_SELECTOR).forEach((element) => element.remove());
+  }
+
+  function ensureSyntheticShortcutMenuItems(pageType) {
+    if (pageType !== 'job' && pageType !== 'build') {
+      removeSyntheticShortcutMenuItems();
+      return [];
+    }
+
+    if (!getJobBaseUrl()) {
+      return [];
+    }
+
+    const container = getShortcutMenuContainer();
+    if (!container) {
+      return [];
+    }
+
+    const foundLinks = [];
+    const configureLink = pageType === 'job' ? findExistingJobMenuLink('configure') : null;
+    if (configureLink) {
+      foundLinks.push({
+        key: 'X',
+        link: configureLink,
+        text: ['Configure']
+      });
+    }
+
+    const historyLink = pageType === 'job' ? findExistingJobMenuLink('history') : null;
+    if (historyLink) {
+      foundLinks.push({
+        key: 'H',
+        link: historyLink,
+        text: ['History']
+      });
+    }
+
+    const syntheticDefinitions = [
+      {
+        key: 'R',
+        label: 'Retrigger > Retry > Rebuild',
+        title: 'Press R to try retrigger, then retry, then rebuild for the last build',
+        action: 'retry-chain',
+        onClick: async () => navigateToLastBuildRetryOrRebuild()
+      },
+      ...(pageType === 'build' ? [{
+        key: 'X/H',
+        label: 'Configure/History',
+        title: 'Press X for configure and H for history',
+        action: 'job-configure-history',
+        onClick: async () => navigateToJobConfigure()
+      }] : []),
+      ...(pageType === 'job' && !configureLink ? [{
+        key: 'X',
+        label: 'Configure',
+        title: 'Press X to open the job configure page',
+        action: 'job-configure',
+        onClick: async () => navigateToJobConfigure()
+      }] : []),
+      ...(pageType === 'job' && !historyLink ? [{
+        key: 'H',
+        label: 'History',
+        title: 'Press H to open the job config history page',
+        action: 'job-history',
+        onClick: async () => navigateToJobHistory()
+      }] : []),
+      {
+        key: 'P/N/O',
+        label: 'Previous/Next/Node',
+        title: 'Press P for previous, N for next, and O for node navigation',
+        action: 'previous-next-node',
+        onClick: async () => navigateToPreviousOrNextBuild('P')
+      }
+    ];
+
+    const syntheticLinks = syntheticDefinitions.map((definition) => {
+      const selector = `${SYNTHETIC_SHORTCUT_MENU_SELECTOR} a[data-jenkins-shortcut-action="${definition.action}"]`;
+      let link = document.querySelector(selector);
+
+      if (!link) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'task';
+        wrapper.setAttribute('data-jenkins-synthetic-shortcut', definition.action);
+
+        link = document.createElement('a');
+        link.href = '#';
+        link.textContent = definition.label;
+        link.title = definition.title;
+        link.setAttribute('data-jenkins-shortcut-action', definition.action);
+        link.addEventListener('click', async (event) => {
+          event.preventDefault();
+          await definition.onClick();
+        });
+
+        wrapper.appendChild(link);
+        container.appendChild(wrapper);
+      }
+
+      return {
+        key: definition.key,
+        link,
+        text: [definition.label]
+      };
+    });
+
+    return foundLinks.concat(syntheticLinks);
   }
 
   function resolveActionUrl(link, baseUrl) {
@@ -501,23 +980,26 @@
     notice.textContent = message;
     notice.style.cssText = `
       position: fixed;
-      top: 18px;
-      right: 18px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
       z-index: 10001;
-      padding: 10px 14px;
+      padding: 12px 18px;
       background: rgba(20, 20, 20, 0.9);
       color: #fff;
       border-radius: 6px;
-      font-size: 13px;
+      font-size: 14px;
       font-family: Arial, sans-serif;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+      text-align: center;
+      min-width: 180px;
     `;
     document.body.appendChild(notice);
 
     actionNoticeTimer = window.setTimeout(() => {
       notice.remove();
       actionNoticeTimer = null;
-    }, 1000);
+    }, 2000);
   }
 
   function navigateWithNotice(url, message) {
@@ -529,8 +1011,27 @@
     return true;
   }
 
+  function restoreStickyShortcuts() {
+    const pageType = detectPageType();
+
+    if (!getStickyShortcutsEnabled() || !pageType) {
+      if (shortcutsActive) {
+        hideShortcuts();
+      }
+      return;
+    }
+
+    ensureNodeBuildExecutorStatusExpanded();
+
+    if (shortcutsActive) {
+      hideShortcuts();
+    }
+
+    showShortcuts();
+  }
+
   function hasDirectShortcut(pageType, keyUpper) {
-    return Boolean(SHORTCUTS[pageType]?.some(shortcut => shortcut.key.toUpperCase() === keyUpper));
+    return Boolean(getShortcutsForPageType(pageType).some(shortcut => shortcut.key.toUpperCase() === keyUpper));
   }
 
   function getMatchedSiteInfo(url = window.location.href) {
@@ -648,31 +1149,36 @@
       return false;
     }
 
-    const lastBuildUrl = `${jobBaseUrl}/lastBuild/`;
-    const rebuildFallbackUrl = `${lastBuildUrl}rebuild/parameterized`;
+    const lastBuildInfo = await getLastBuildInfo();
+    if (!lastBuildInfo?.buildBaseUrl) {
+      return false;
+    }
+
+    const buildUrl = `${lastBuildInfo.buildBaseUrl}/`;
+    const rebuildFallbackUrl = `${buildUrl}rebuild/parameterized`;
 
     try {
-      const response = await fetch(lastBuildUrl, { credentials: 'include' });
+      const response = await fetch(buildUrl, { credentials: 'include' });
       if (!response.ok) {
-        throw new Error(`Failed to load lastBuild page: ${response.status}`);
+        throw new Error(`Failed to load build page: ${response.status}`);
       }
 
       const html = await response.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const retriggerLink = doc.querySelector('#side-panel a[href*="retrigger"], .task a[href*="retrigger"], #tasks a[href*="retrigger"]');
-      const retriggerUrl = resolveActionUrl(retriggerLink, lastBuildUrl);
+      const retriggerUrl = resolveActionUrl(retriggerLink, buildUrl);
       if (retriggerUrl) {
         return navigateWithNotice(retriggerUrl, 'Executed via Retrigger');
       }
 
       const retryLink = doc.querySelector('#side-panel a[href*="retry"], .task a[href*="retry"], #tasks a[href*="retry"]');
-      const retryUrl = resolveActionUrl(retryLink, lastBuildUrl);
+      const retryUrl = resolveActionUrl(retryLink, buildUrl);
 
       if (retryUrl) {
         return navigateWithNotice(retryUrl, 'Executed via Retry');
       }
     } catch (error) {
-      console.log('Failed to inspect lastBuild retry action, falling back to rebuild:', error);
+      console.log('Failed to inspect build retry action, falling back to rebuild:', error);
     }
 
     return navigateWithNotice(rebuildFallbackUrl, 'Retrigger/Retry unavailable. Executed via Rebuild');
@@ -687,45 +1193,35 @@
 
     const keyUpper = key.toUpperCase();
 
-    if (pageType === 'job' && keyUpper === 'R') {
+    if ((pageType === 'job' || pageType === 'build') && keyUpper === 'R') {
       return navigateToLastBuildRetryOrRebuild();
     }
 
-    // Special handling for H - Job Config History
-    if (pageType === 'job' && keyUpper === 'H') {
-      const currentUrl = window.location.href;
-      const jobUrl = currentUrl.match(/^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*)\//);
-      if (jobUrl) {
-        const targetUrl = jobUrl[1] + '/jobConfigHistory';
-        window.location.href = targetUrl;
-        hideShortcuts();
-        return true;
-      }
+    if ((pageType === 'job' || pageType === 'build') && keyUpper === 'X') {
+      return navigateToJobConfigure();
+    }
+
+    if ((pageType === 'job' || pageType === 'build') && keyUpper === 'H') {
+      return navigateToJobHistory();
+    }
+
+    if ((pageType === 'job' || pageType === 'build') && (keyUpper === 'C' || keyUpper === 'T')) {
+      return navigateToConsoleShortcut(keyUpper);
+    }
+
+    if ((pageType === 'job' || pageType === 'build') && (keyUpper === 'P' || keyUpper === 'N')) {
+      return navigateToPreviousOrNextBuild(keyUpper);
+    }
+
+    if ((pageType === 'job' || pageType === 'build') && keyUpper === 'O') {
+      return navigateToBuildNode();
     }
 
     if (pageType === 'node' && keyUpper === 'Z') {
       return await triggerNodeLabels();
     }
 
-    // Special handling for C and T on build page
-    if (pageType === 'build' && (keyUpper === 'C' || keyUpper === 'T')) {
-      const currentUrl = window.location.href;
-      const buildUrl = currentUrl.match(/^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*\/\d+)\/?/);
-      if (buildUrl) {
-        let targetUrl;
-        if (keyUpper === 'C') {
-          targetUrl = buildUrl[1] + '/console';
-        } else if (keyUpper === 'T') {
-          targetUrl = buildUrl[1] + '/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog&locale=en';
-        }
-        console.log('Navigating to:', targetUrl);
-        window.location.href = targetUrl;
-        hideShortcuts();
-        return true;
-      }
-    }
-
-    const shortcuts = SHORTCUTS[pageType];
+    const shortcuts = getShortcutsForPageType(pageType);
     const shortcut = shortcuts.find(s => s.key.toUpperCase() === keyUpper);
     
     if (!shortcut) {
@@ -1025,7 +1521,7 @@
       item.addEventListener('mouseleave', (e) => {
         e.currentTarget.style.background = 'rgba(160, 160, 160, 0.5)';
       });
-      item.addEventListener('click', (e) => {
+      item.addEventListener('click', async (e) => {
         const url = e.currentTarget.getAttribute('data-url');
         if (url) {
           // Calculate click position relative to the element
@@ -1035,11 +1531,14 @@
           
           let targetUrl = url;
           
-          // If clicked on right half (50%), add /lastBuild/console
+          // If clicked on right half (50%), open the resolved last build console
           if (clickX > elementWidth / 2) {
-            // Remove trailing slash if exists
-            const cleanUrl = url.replace(/\/$/, '');
-            targetUrl = cleanUrl + '/lastBuild/console';
+            const lastBuildInfo = await getLastBuildInfo(url);
+            if (!lastBuildInfo?.buildBaseUrl) {
+              return;
+            }
+
+            targetUrl = `${lastBuildInfo.buildBaseUrl}/console`;
             console.log('Right half clicked - navigating to console:', targetUrl);
           } else {
             console.log('Left half clicked - navigating to job:', targetUrl);
@@ -1071,15 +1570,13 @@
   async function showStatisticsReport() {
     try {
       // Get current job URL from page (supports nested jobs like /job/folder/job/name/)
-      const currentUrl = window.location.href;
-      const jobMatch = currentUrl.match(/^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*)/);
+      const jobBaseUrl = getJobBaseUrl();
       
-      if (!jobMatch) {
+      if (!jobBaseUrl) {
         alert('Cannot determine job URL. Please navigate to a Jenkins job page.');
         return;
       }
-      
-      const jobBaseUrl = jobMatch[1];
+
       const apiUrl = jobBaseUrl + '/api/json?tree=fullDisplayName,url,buildable,queueItem,allBuilds[number,building,timestamp,duration,result,url,displayName,description]';
       
       
@@ -1832,7 +2329,7 @@
       
       // Also toggle shortcuts
       if (shortcutsActive) {
-        hideShortcuts();
+        hideShortcuts({ clearSticky: true });
       } else {
         showShortcuts();
       }
@@ -1876,6 +2373,8 @@
 
     // Save current URL on page load
     await saveUrlVisit(window.location.href);
+
+    restoreStickyShortcuts();
 
     // Add keyboard event listener (capture phase to handle before Jenkins)
     document.addEventListener('keydown', handleKeyPress, { capture: true });
@@ -1952,6 +2451,9 @@
       if (currentUrl !== lastUrl) {
         lastUrl = currentUrl;
         await saveUrlVisit(currentUrl);
+        window.setTimeout(() => {
+          restoreStickyShortcuts();
+        }, 0);
       }
     });
     
@@ -1962,6 +2464,9 @@
     window.addEventListener('popstate', async () => {
       console.log('URL changed (popstate):', window.location.href);
       await saveUrlVisit(window.location.href);
+      window.setTimeout(() => {
+        restoreStickyShortcuts();
+      }, 0);
     });
   }
 
