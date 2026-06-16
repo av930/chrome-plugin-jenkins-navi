@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Jenkins Navigator",
-  "version": "2.2",
+  "version": "3.0",
   "description": "Quick navigation to Jenkins and other tools",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAm/sbh0m8y/mTuW6W3d9Z",
   "action": {
     "default_popup": "run_dialog.html",
     "default_title": "Jenkins Navigator",
