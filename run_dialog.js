@@ -79,17 +79,76 @@ if (baseUrl && baseUrl.startsWith('https://')) {
 console.log('Mode:', isRunDialogMode ? 'Run Dialog' : 'Popup');
 console.log('Base URL:', baseUrl);
 
+// ========== Array Cycling Support ==========
+
+// Get the next value from an array, cycling through indices stored in chrome.storage
+async function getNextArrayValue(sectionName, itemName, values) {
+  const storageKey = `cycle_${sectionName}_${itemName}`;
+  const result = await chrome.storage.local.get([storageKey]);
+  const currentIndex = result[storageKey] || 0;
+  const value = values[currentIndex];
+  const nextIndex = (currentIndex + 1) % values.length;
+  await chrome.storage.local.set({ [storageKey]: nextIndex });
+  return value;
+}
+
+// Resolve a value - if it's a string starting with "function/", handle as internal function
+// Returns { type: 'url', url: '...' } or { type: 'function', name: '...' }
+function resolveValueType(value) {
+  if (typeof value === 'string') {
+    if (value.startsWith('function/')) {
+      return { type: 'function', name: value.substring('function/'.length) };
+    } else if (value.startsWith('fuction/')) {
+      return { type: 'function', name: value.substring('fuction/'.length) };
+    }
+  }
+  return { type: 'url', url: value };
+}
+
+// Handle internal function calls from popup
+async function handleInternalFunction(funcName) {
+  const server = getSelectedServer();
+  const siteUrl = server ? config.sites[server] : null;
+
+  if (funcName === 'label') {
+    // Open label_page.html
+    if (!siteUrl) {
+      console.error('No server selected for function/label');
+      return;
+    }
+    const labelPageUrl = chrome.runtime.getURL(
+      `label_page.html?server=${encodeURIComponent(server)}&site=${encodeURIComponent(siteUrl)}`
+    );
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      chrome.tabs.update(tabs[0].id, { url: labelPageUrl });
+    });
+  } else if (funcName === 'report' || funcName === 'z-report') {
+    // Send message to content script to generate z-report
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'triggerZReport' }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Failed to trigger z-report:', chrome.runtime.lastError.message);
+          }
+        });
+      }
+    });
+  } else {
+    console.warn('Unknown internal function:', funcName);
+  }
+}
+
 // ========== Popup Functions ==========
 
-// Generate version string: v년도.날짜시간분 (분은 10분 단위)
+// Generate version string: v년도.날짜시간분
 function generateVersion() {
   const now = new Date();
-  const year = now.getFullYear().toString().slice(-2); // 년도 마지막 2자리
-  const month = (now.getMonth() + 1).toString(); // 월
-  const day = now.getDate().toString(); // 일
-  const hour = now.getHours().toString().padStart(2, '0'); // 시간 (2자리)
-  const minute = now.getMinutes(); // 10분 단위로 내림
-  const minuteStr = minute.toString().padStart(2, '0'); // 분 (2자리)
+  const year = now.getFullYear().toString().slice(-2);
+  const month = (now.getMonth() + 1).toString();
+  const day = now.getDate().toString();
+  const hour = now.getHours().toString().padStart(2, '0');
+  const minute = now.getMinutes();
+  const minuteStr = minute.toString().padStart(2, '0');
 
   return `v${year}.${month}${day}${hour}${minuteStr}`;
 }
@@ -126,7 +185,7 @@ async function loadConfig() {
     // 라디오 버튼 생성 (await로 완료 대기)
     await createRadioButtons();
 
-    // config.list의 순서대로 버튼 생성 (sites 제외)
+    // config의 순서대로 버튼 생성 (sites 제외)
     createButtonsInOrder();
 
   } catch (error) {
@@ -134,7 +193,7 @@ async function loadConfig() {
   }
 }
 
-// config.list의 순서대로 버튼 생성
+// config의 순서대로 버튼 생성
 function createButtonsInOrder() {
   const buttonGrid = document.getElementById('buttonGrid');
   if (!buttonGrid) return;
@@ -148,31 +207,40 @@ function createButtonsInOrder() {
     console.log(`Creating buttons for section: ${sectionName}`);
 
     if (sectionName === 'menus') {
-      createSectionButtons(sectionData, 'menu-btn', (menuName, menuPath) => {
-        handleMenuClick(menuName, menuPath);
+      createSectionButtons(sectionData, 'menu-btn', sectionName, (menuName, menuPath) => {
+        handleMenuClick(menuName, menuPath, sectionName);
       });
     } else if (sectionName === 'run') {
-      createSectionButtons(sectionData, 'run-btn', (runName, runPath) => {
+      createSectionButtons(sectionData, 'run-btn', sectionName, (runName, runPath) => {
         handleRunClick(runPath, runName);
       }, '▶ ');
     } else if (sectionName === 'job') {
-      createSectionButtons(sectionData, 'job-btn', (jobName, jobPath) => {
-        handleJobClick(jobPath);
+      createSectionButtons(sectionData, 'job-btn', sectionName, (jobName, jobPath) => {
+        handleJobClick(jobPath, sectionName, jobName);
       });
     } else if (sectionName === 'custom') {
       // custom은 URL에 따라 클래스가 다름
-      for (const [customName, customUrl] of Object.entries(sectionData)) {
+      for (const [customName, customValue] of Object.entries(sectionData)) {
         const button = document.createElement('button');
-        if (customUrl.toLowerCase().includes('jenkins')) {
+        // Check the first URL for styling (handle both string and array)
+        const firstUrl = Array.isArray(customValue) ? customValue[0] : customValue;
+        if (firstUrl.toLowerCase().includes('jenkins')) {
           button.className = 'action-btn jenkins-btn';
         } else {
           button.className = 'action-btn custom-btn';
         }
         button.dataset.action = customName;
-        button.dataset.url = customUrl;
         button.textContent = customName;
-        button.addEventListener('click', () => {
-          handleCustomClick(customUrl);
+        button.addEventListener('click', async () => {
+          const value = Array.isArray(customValue)
+            ? await getNextArrayValue(sectionName, customName, customValue)
+            : customValue;
+          const resolved = resolveValueType(value);
+          if (resolved.type === 'function') {
+            await handleInternalFunction(resolved.name);
+          } else {
+            handleCustomClick(resolved.url);
+          }
         });
         buttonGrid.appendChild(button);
       }
@@ -180,24 +248,31 @@ function createButtonsInOrder() {
   }
 }
 
-// 섹션별 버튼 생성 헬퍼 함수
-function createSectionButtons(sectionData, className, clickHandler, prefix = '') {
+// 섹션별 버튼 생성 헬퍼 함수 (배열 순환 지원)
+function createSectionButtons(sectionData, className, sectionName, clickHandler, prefix = '') {
   const buttonGrid = document.getElementById('buttonGrid');
 
-  for (const [name, path] of Object.entries(sectionData)) {
+  for (const [name, pathOrArray] of Object.entries(sectionData)) {
     const button = document.createElement('button');
     button.className = `action-btn ${className}`;
     button.dataset.action = name;
-    button.dataset.path = path;
     button.textContent = prefix + name;
-    button.addEventListener('click', () => {
-      clickHandler(name, path);
+    button.addEventListener('click', async () => {
+      const value = Array.isArray(pathOrArray)
+        ? await getNextArrayValue(sectionName, name, pathOrArray)
+        : pathOrArray;
+      const resolved = resolveValueType(value);
+      if (resolved.type === 'function') {
+        await handleInternalFunction(resolved.name);
+      } else {
+        clickHandler(name, resolved.url);
+      }
     });
     buttonGrid.appendChild(button);
   }
 }
 
-// config.list의 sites로부터 라디오 버튼 생성
+// config의 sites로부터 라디오 버튼 생성
 async function createRadioButtons() {
   const radioGroup = document.getElementById('radioGroup');
   if (!radioGroup) return;
@@ -290,22 +365,8 @@ function getSelectedServer() {
   return radio ? radio.value : null;
 }
 
-async function getNodeMenuToggleUrl(server, siteUrl, menuPath) {
-  const result = await chrome.storage.local.get([NODE_MENU_TOGGLE_STORAGE_KEY]);
-  const toggleState = result[NODE_MENU_TOGGLE_STORAGE_KEY] || {};
-  const currentView = toggleState[server] === 'label' ? 'label' : 'node';
-  const targetUrl = currentView === 'node'
-    ? `${siteUrl}/${menuPath}`
-    : chrome.runtime.getURL(`label_page.html?server=${encodeURIComponent(server)}&site=${encodeURIComponent(siteUrl)}`);
-
-  toggleState[server] = currentView === 'node' ? 'label' : 'node';
-  await chrome.storage.local.set({ [NODE_MENU_TOGGLE_STORAGE_KEY]: toggleState });
-
-  return targetUrl;
-}
-
-// Handle menu button click
-async function handleMenuClick(menuName, menuPath) {
+// handleMenuClick handles menu button click
+async function handleMenuClick(menuName, menuPath, sectionName) {
   const server = getSelectedServer();
 
   if (!server) {
@@ -319,9 +380,7 @@ async function handleMenuClick(menuName, menuPath) {
     return;
   }
 
-  const url = menuName === 'node'
-    ? await getNodeMenuToggleUrl(server, siteUrl, menuPath)
-    : `${siteUrl}/${menuPath}`;
+  const url = `${siteUrl}/${menuPath}`;
 
   console.log('Opening URL:', url);
 
@@ -358,41 +417,27 @@ async function handleRunClick(runUrl, buttonName) {
 
 // Handle custom button click (직접 URL로 이동)
 function handleCustomClick(customUrl) {
-  console.log('=== handleCustomClick START ===');
   console.log('Opening custom URL:', customUrl);
 
   // URL에 'jenkins'가 포함되어 있으면 sites 항목과 비교하여 라디오 버튼 선택
   if (customUrl.toLowerCase().includes('jenkins')) {
     const sites = config.sites;
     if (sites) {
-      // sites의 각 item을 순회하며 customUrl이 해당 siteUrl을 포함하는지 확인
       for (const [siteName, siteUrl] of Object.entries(sites)) {
         if (customUrl.includes(siteUrl)) {
-          // 해당 site의 라디오 버튼 선택
           const radioButton = document.querySelector(`input[name="server"][value="${siteName}"]`);
           if (radioButton) {
             radioButton.checked = true;
-            console.log(`Auto-selected radio button: ${siteName} (matched with ${siteUrl})`);
-
-            // 선택한 site를 storage에 저장
-            chrome.storage.local.set({ selectedSite: siteName }, () => {
-              console.log('Saved selected site:', siteName);
-            });
-
-            break; // 첫 번째 매칭되는 항목만 선택
+            chrome.storage.local.set({ selectedSite: siteName });
+            break;
           }
         }
       }
     }
   }
 
-  console.log('About to query tabs...');
-
   // Open URL in current tab
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    console.log('=== Inside chrome.tabs.query callback ===');
-    console.log('Tabs:', tabs);
-
     if (!tabs || tabs.length === 0) {
       console.error('No active tab found!');
       return;
@@ -401,72 +446,27 @@ function handleCustomClick(customUrl) {
     const currentUrl = tabs[0].url;
     let targetUrl = customUrl;
 
-    // URL 정규화 함수 (프로토콜과 끝 슬래시 제거)
-    const normalizeUrl = (url) => url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
-
-    console.log('Current URL:', currentUrl);
-    console.log('Custom URL:', customUrl);
-    console.log('Normalized current:', normalizeUrl(currentUrl));
-    console.log('Normalized custom:', normalizeUrl(customUrl));
-
-    // 현재 URL과 customUrl이 같으면 (프로토콜, 슬래시 무시) job/.* 부분 제거
-    if (normalizeUrl(currentUrl) === normalizeUrl(customUrl)) {
-      console.log('URLs MATCH! Checking for job pattern...');
-      const jobMatch = customUrl.match(/^https?:\/\/(.*)\/job\/[^\/]+\/?$/);
-      console.log('Job match result:', jobMatch);
-
-      if (jobMatch) {
-        // 현재 URL의 프로토콜 사용
-        const protocol = currentUrl.match(/^https?:\/\//)[0];
-        targetUrl = protocol + jobMatch[1] + '/';
-        console.log('✓ Current URL matches custom URL, removed job/.*');
-        console.log('Target URL:', targetUrl);
-      } else {
-        console.log('✗ No job pattern found in customUrl');
-      }
-    } else {
-      console.log('✓ URLs do not match, navigating to custom URL');
-    }
-
-    console.log('Final target URL:', targetUrl);
-    console.log('Updating tab...');
-    chrome.tabs.update(tabs[0].id, { url: targetUrl }, () => {
-      console.log('Tab updated successfully');
-    });
+    chrome.tabs.update(tabs[0].id, { url: targetUrl });
   });
-
-  console.log('=== handleCustomClick END ===');
 }
 
 // Handle job button click (현재 URL 분석 후 경로 추가)
-function handleJobClick(jobPath) {
+function handleJobClick(jobPath, sectionName, jobName) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const currentUrl = tabs[0].url;
-    console.log('Current URL:', currentUrl);
-    console.log('Job path:', jobPath);
-    console.log('Previous job URL:', previousJobUrl);
-    console.log('Previous build URL:', previousBuildUrl);
-
     let newUrl = '';
     let baseUrl = '';
 
     // 현재 URL이 .*/job/.*/[0-9]+/.* 패턴인지 확인 (build URL)
     if (/.*\/job\/[^\/]+\/\d+\/.*/.test(currentUrl)) {
-      console.log('Pattern matched: .*/job/.*/[0-9]+/.*');
-
       // 현재 URL이 이전 build_url을 포함하고 있는지 확인
       if (previousBuildUrl && currentUrl.includes(previousBuildUrl)) {
-        // 이전 build_url에 jobPath 추가 (lastBuild 제거)
         baseUrl = previousBuildUrl;
-        console.log('Current URL includes previous build URL, using previous build URL');
       } else {
-        // 현재 URL에서 ^http.*/job/.*/[0-9]+/ 패턴 추출
         const match = currentUrl.match(/^(https?:\/\/.*\/job\/[^\/]+\/\d+\/)/);
         if (match) {
           baseUrl = match[1];
-          // 현재 URL을 build_url로 저장
           previousBuildUrl = baseUrl;
-          console.log('Using current URL as base, saved to previousBuildUrl');
         } else {
           console.error('Failed to extract build URL pattern');
           return;
@@ -479,21 +479,14 @@ function handleJobClick(jobPath) {
     }
     // 현재 URL이 .*/job/.*/[0-9]+/.* 패턴이 아닌 경우 (job URL)
     else {
-      console.log('Pattern matched: job URL (not build URL)');
-
       // 현재 URL이 이전 job_url을 포함하고 있는지 확인
       if (previousJobUrl && currentUrl.includes(previousJobUrl)) {
-        // 이전 job_url에 jobPath 추가
         baseUrl = previousJobUrl;
-        console.log('Current URL includes previous job URL, using previous job URL');
       } else {
-        // 현재 URL에서 ^http.*/job/.*/ 패턴 추출
         const match = currentUrl.match(/^(https?:\/\/.*\/job\/[^\/]+\/)/);
         if (match) {
           baseUrl = match[1];
-          // 현재 URL을 job_url로 저장
           previousJobUrl = baseUrl;
-          console.log('Using current URL as base, saved to previousJobUrl');
         } else {
           console.error('Failed to extract job URL pattern');
           return;
@@ -504,7 +497,6 @@ function handleJobClick(jobPath) {
       newUrl = baseUrl + jobPath;
     }
 
-    console.log('Base URL:', baseUrl);
     console.log('Opening new URL:', newUrl);
     chrome.tabs.update(tabs[0].id, { url: newUrl });
   });
@@ -562,7 +554,6 @@ async function initializeRunDialog() {
 
     if (matchedSite) {
       updatedParams = savedParams.replace(/^(PARAM1=)(.*)$/m, `$1${pageUrl}`);
-      console.log(`PARAM1 updated with current page URL (matched site: ${matchedSite[0]})`);
     }
   }
 
@@ -607,35 +598,23 @@ async function initializeRunDialog() {
     // Convert https to http in final URL (force http - replace all occurrences)
     finalUrl = finalUrl.replace(/https:\/\//gi, 'http://');
 
-    console.log('=== URL DEBUG INFO ===');
-    console.log('Base URL:', baseUrl);
-    console.log('Final URL after conversion:', finalUrl);
-    console.log('Contains https:', finalUrl.includes('https://'));
-    console.log('======================');
-
     // Save parameters before executing
     await saveParameters(paramsText);
 
     // Get current popup window ID
     const currentWindow = await chrome.windows.getCurrent();
     const popupWindowId = currentWindow.id;
-    console.log('Current popup window ID:', popupWindowId);
 
     // Create new tab with URL (active: true to make it visible)
-    console.log('Creating tab with URL:', finalUrl);
-
     try {
       const tab = await chrome.tabs.create({ url: finalUrl, active: true });
       console.log('Tab created successfully:', tab.id, 'URL:', finalUrl);
 
       // Close this popup window after 2 seconds
       setTimeout(() => {
-        console.log('Closing popup window after 2 second delay');
         chrome.windows.remove(popupWindowId, () => {
           if (chrome.runtime.lastError) {
             console.error('Failed to close window:', chrome.runtime.lastError);
-          } else {
-            console.log('Popup window closed successfully');
           }
         });
       }, 2000);

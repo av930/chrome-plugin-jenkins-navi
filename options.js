@@ -11,10 +11,9 @@ const DEFAULT_CONFIG = {
   },
   // add favorite menu in jenkins
   "menus": {
-    "node": "computer",
+    "node": ["computer","function/label"],
     "trigger": "gerrit_manual_trigger",
-    "manage-role": "role-strategy/manage-roles",
-    "assign-role": "role-strategy/assign-roles",
+    "assign/role": ["role-strategy/manage-roles","role-strategy/assign-roles"],
     "credentials": "credentials",
     "config": "configure",
     "toolconfig": "configureTools",
@@ -22,10 +21,10 @@ const DEFAULT_CONFIG = {
   },
   // automatically added after your job url
   "job": {
-    "textlog": "lastBuild/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog",
-    "conslog": "lastBuild/consoleFull",
-    "env-var": "lastBuild/injectedEnvVars",
-    "rebuild": "lastBuild/rebuild/parameterized"
+    "text/log": ["lastBuild/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog","lastBuild/consoleText"],
+    "cons/log": ["lastBuild/console","lastBuild/consoleFull"],
+    "env/param": ["lastBuild/injectedEnvVars","lastBuild/parameters"],
+    "configure": "configure"
   },
   // add your job frequently visited  
   "custom": {
@@ -55,8 +54,8 @@ async function loadConfig() {
       configText = result.userConfigText;
       console.log('Loaded user config from storage');
     } else {
-      // Load from config.list file if no user config exists
-      const response = await fetch('config.list');
+      // Load from config.default file if no user config exists
+      const response = await fetch('config.default');
       configText = await response.text();
       console.log('Loaded default config from file');
     }

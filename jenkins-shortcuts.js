@@ -1,62 +1,193 @@
 // Jenkins Shortcuts - Content Script
 // Provides keyboard shortcuts for Jenkins menu navigation
 
-(function() {
+(function () {
   'use strict';
 
   // State management
-  let shortcutsActive = false;
+  let fModeActive = false; // F key prefix mode
   let config = null;
-  let currentPageType = null; // 'job', 'build', or 'node'
   let urlMenuVisible = false;
   let lastSavedUrl = ''; // Track last saved URL to avoid duplicates
   let actionNoticeTimer = null;
   let breadcrumbToggleIndex = 0;
 
-  const JOB_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*)\/?/;
-  const BUILD_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(\/job\/[^\/]+)*\/\d+)\/?/;
+  const JOB_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(?:\/job\/[^\/]+)*)\/?\/?/;
+  const BUILD_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(?:\/job\/[^\/]+)*\/\d+)\/?/;
   const SYNTHETIC_SHORTCUT_MENU_SELECTOR = '[data-jenkins-synthetic-shortcut]';
   const TIMESTAMPS_PATH = '/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog';
-  const STICKY_SHORTCUTS_STORAGE_KEY = 'jenkinsShortcutsSticky';
+
+  function normalizeComparableUrl(url) {
+    return String(url || '')
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$|[?#].*$/g, '')
+      .toLowerCase();
+  }
+
+  function extractJobNameFromUrl(url) {
+    const matches = [...String(url || '').matchAll(/\/job\/([^\/?#]+)/gi)];
+    if (matches.length === 0) return null;
+
+    try {
+      return decodeURIComponent(matches[matches.length - 1][1]).toLowerCase();
+    } catch (error) {
+      return matches[matches.length - 1][1].toLowerCase();
+    }
+  }
+
+  function getCanonicalViewJobUrl(url) {
+    const match = String(url || '').match(/^(https?:\/\/[^?#]+?\/view\/[^\/?#]+\/job\/[^\/?#]+)\/?(?:[?#].*)?$/i)
+      || String(url || '').match(/^(https?:\/\/[^?#]+?\/view\/[^\/?#]+\/job\/[^\/?#]+)\//i);
+    return match ? `${match[1].replace(/\/+$/, '')}/` : null;
+  }
+
+  function getCanonicalBareJobUrl(url) {
+    const match = String(url || '').match(/^(https?:\/\/[^?#]+?\/job\/[^\/?#]+)\/?(?:[?#].*)?$/i)
+      || String(url || '').match(/^(https?:\/\/[^?#]+?\/job\/[^\/?#]+)\//i);
+    return match ? `${match[1].replace(/\/+$/, '')}/` : null;
+  }
+
+  function getSitePrefixFromViewJobUrl(url) {
+    return String(url || '').replace(/\/view\/[^\/]+\/job\/[^\/]+\/?$/i, '').replace(/\/+$/, '');
+  }
+
+  function getSitePrefixFromBareJobUrl(url) {
+    return String(url || '').replace(/\/job\/[^\/]+\/?$/i, '').replace(/\/+$/, '');
+  }
+
+  function getSitePrefixFromAnyJobUrl(url) {
+    const viewCanonical = getCanonicalViewJobUrl(url);
+    if (viewCanonical) return getSitePrefixFromViewJobUrl(viewCanonical);
+
+    const bareCanonical = getCanonicalBareJobUrl(url);
+    if (bareCanonical) return getSitePrefixFromBareJobUrl(bareCanonical);
+
+    const jobBase = getJobBaseUrl(url);
+    if (!jobBase) return null;
+
+    return getCanonicalViewJobUrl(jobBase)
+      ? getSitePrefixFromViewJobUrl(jobBase)
+      : getSitePrefixFromBareJobUrl(jobBase);
+  }
+
+  function sanitizeUrlHistory(rawHistory = {}) {
+    const sanitized = {};
+
+    Object.entries(rawHistory).forEach(([url, data]) => {
+      const canonical = getCanonicalViewJobUrl(url);
+      if (!canonical) return;
+
+      const safeData = {
+        count: Math.max(1, Number(data?.count || 1)),
+        firstVisit: Number(data?.firstVisit || Date.now()),
+        lastVisit: Number(data?.lastVisit || Date.now())
+      };
+
+      if (!sanitized[canonical]) {
+        sanitized[canonical] = safeData;
+        return;
+      }
+
+      sanitized[canonical] = {
+        count: sanitized[canonical].count + safeData.count,
+        firstVisit: Math.min(sanitized[canonical].firstVisit, safeData.firstVisit),
+        lastVisit: Math.max(sanitized[canonical].lastVisit, safeData.lastVisit)
+      };
+    });
+
+    // Convert bare job entries into existing view-job entries when mapping is possible.
+    Object.entries(rawHistory).forEach(([url, data]) => {
+      const bareCanonical = getCanonicalBareJobUrl(url);
+      if (!bareCanonical) return;
+
+      const mappedViewUrl = findMappedViewJobUrlForBareJob(bareCanonical, sanitized);
+      if (!mappedViewUrl || !sanitized[mappedViewUrl]) return;
+
+      const safeData = {
+        count: Math.max(1, Number(data?.count || 1)),
+        firstVisit: Number(data?.firstVisit || Date.now()),
+        lastVisit: Number(data?.lastVisit || Date.now())
+      };
+
+      sanitized[mappedViewUrl] = {
+        count: sanitized[mappedViewUrl].count + safeData.count,
+        firstVisit: Math.min(sanitized[mappedViewUrl].firstVisit, safeData.firstVisit),
+        lastVisit: Math.max(sanitized[mappedViewUrl].lastVisit, safeData.lastVisit)
+      };
+    });
+
+    return sanitized;
+  }
+
+  function findMappedViewJobUrlForBareJob(bareJobUrl, urlHistory) {
+    const bareJobName = extractJobNameFromUrl(bareJobUrl);
+    const bareSitePrefix = normalizeComparableUrl(getSitePrefixFromBareJobUrl(bareJobUrl));
+    if (!bareJobName || !bareSitePrefix) return null;
+
+    for (const savedUrl of Object.keys(urlHistory || {})) {
+      const viewJobName = extractJobNameFromUrl(savedUrl);
+      if (!viewJobName || viewJobName !== bareJobName) continue;
+
+      const viewSitePrefix = normalizeComparableUrl(getSitePrefixFromViewJobUrl(savedUrl));
+      if (viewSitePrefix === bareSitePrefix) {
+        return savedUrl;
+      }
+    }
+
+    return null;
+  }
+
+  // Unified shortcut mappings (no pageType distinction)
+  // When multiple entries share the same key, the first matching entry wins
+  const SHORTCUTS = [
+    { key: 'B', text: ['Build with Parameters', 'Build Now', '빌드 실행'], selector: '#side-panel a[href*="build?"], .task a[href*="build?"]' },
+    { key: 'R', text: ['Retrigger Last', 'Retrigger/Retry/Rebuild Last'], selector: null },
+    { key: 'D', text: ['Delete build', '빌드 삭제'], selector: '#side-panel a[href*="doDelete"], .task a[href*="doDelete"]' },
+    { key: 'D', text: ['Disconnect', '연결끊기'], selector: '#side-panel a[href*="toggleOffline"], .task a[href*="toggleOffline"]' },
+    { key: 'C/T', text: ['Console Output', '콘솔 출력'], selector: '#side-panel a[href*="/console"], .task a[href*="/console"], .task a[href*="/consoleText"], .task a[href*="/consoleFull"]' },
+    { key: 'E', text: ['Environment Variables'], selector: '#side-panel a[href*="injectedEnvVars"], .task a[href*="injectedEnvVars"]' },
+    { key: 'X', text: ['구성', 'Configure'], selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"]' },
+    { key: 'B', text: ['Build History'], selector: '#side-panel a[href*="builds"], .task a[href*="builds"]' },
+    { key: 'S', text: ['System Information'], selector: '#side-panel a[href*="systemInfo"], .task a[href*="systemInfo"]' },
+    { key: 'H', text: ['Agent Config History'], selector: '#side-panel a[href*="nodeConfigHistory"], .task a[href*="nodeConfigHistory"]' },
+    { key: 'C/T', text: ['Log'], selector: '#side-panel a[href*="log"], .task a[href*="log"]' }
+  ];
 
   // Save URL visit history to storage
   async function saveUrlVisit(url) {
     if (!url || !url.includes('jenkins')) return;
-    
+
     try {
-      // Normalize URL: Remove build numbers, console, etc. Keep only up to /job/jobname
-      let normalizedUrl = url;
-      
-      // Pattern: http://~/job/jobname/12345/... or /console -> keep only http://~/job/jobname
-      const jobMatch = url.match(/^(https?:\/\/.+?\/job\/[^\/]+)/);
-      if (jobMatch) {
-        normalizedUrl = jobMatch[1] + '/';
-      }
-      
-      // Skip if same as last saved URL
-      if (normalizedUrl === lastSavedUrl) {
-        return;
-      }
-      lastSavedUrl = normalizedUrl;
-      
-      // Check if extension context is still valid
-      if (!chrome.runtime?.id) {
-        return;
-      }
-      
+      if (!chrome.runtime?.id) return;
+
       const result = await chrome.storage.local.get(['urlHistory']);
-      let urlHistory = result.urlHistory || {};
-      
-      // Check if URL is in the last 5 entries
+      let urlHistory = sanitizeUrlHistory(result.urlHistory || {});
+
+      let normalizedUrl = getCanonicalViewJobUrl(url);
+
+      if (!normalizedUrl) {
+        const bareJobUrl = getCanonicalBareJobUrl(url);
+        if (!bareJobUrl) {
+          await chrome.storage.local.set({ urlHistory });
+          return;
+        }
+
+        normalizedUrl = findMappedViewJobUrlForBareJob(bareJobUrl, urlHistory);
+        if (!normalizedUrl) {
+          await chrome.storage.local.set({ urlHistory });
+          return;
+        }
+      }
+
+      if (normalizedUrl === lastSavedUrl) return;
+      lastSavedUrl = normalizedUrl;
+
       const entries = Object.entries(urlHistory);
       entries.sort((a, b) => b[1].lastVisit - a[1].lastVisit);
       const recentUrls = entries.slice(0, 5).map(([url]) => url);
-      
-      if (recentUrls.includes(normalizedUrl)) {
-        return;
-      }
-      
-      // 기존 방문 횟수 증가 또는 새로 추가
+
+      if (recentUrls.includes(normalizedUrl)) return;
+
       if (urlHistory[normalizedUrl]) {
         urlHistory[normalizedUrl].count++;
         urlHistory[normalizedUrl].lastVisit = Date.now();
@@ -67,284 +198,133 @@
           lastVisit: Date.now()
         };
       }
-      
-      // 최근 90개만 유지 (가장 최근 방문 기준)
+
       const allEntries = Object.entries(urlHistory);
       if (allEntries.length > 90) {
         allEntries.sort((a, b) => b[1].lastVisit - a[1].lastVisit);
         urlHistory = Object.fromEntries(allEntries.slice(0, 90));
       }
-      
+
       await chrome.storage.local.set({ urlHistory });
     } catch (error) {
       console.error('Failed to save URL visit:', error);
     }
   }
 
-  // Shortcut mappings for different page types
-  const SHORTCUTS = [
-    { pageType: 'job', key: 'B', text: ['Build with Parameters', 'Build Now', '빌드 실행'], selector: '#side-panel a[href*="build?"], .task a[href*="build?"]' },
-    //{ pageType: 'job', key: 'E', text: ['Rebuild Last'], selector: '#side-panel a[href*="rebuild"], .task a[href*="rebuild"]' },
-    { pageType: 'job', key: 'R', text: ['Retrigger Last', 'Retrigger/Retry/Rebuild Last'], selector: null },
-    { pageType: 'build', key: 'D', text: ['Delete build', '빌드 삭제'], selector: '#side-panel a[href*="doDelete"], .task a[href*="doDelete"]' },
-    { pageType: 'build', key: 'C/T', text: ['Console Output', '콘솔 출력'], selector: '#side-panel a[href*="/console"], .task a[href*="/console"]', isSpecial: true },
-    { pageType: 'build', key: 'E', text: ['Environment Variables'], selector: '#side-panel a[href*="injectedEnvVars"], .task a[href*="injectedEnvVars"]' },
-    { pageType: 'build', key: 'G', text: ['Retrigger'], selector: '#side-panel a[href*="retrigger"], .task a[href*="retrigger"]' },
-    { pageType: 'node', key: 'X', text: ['구성', 'Configure'], selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"]' },
-    { pageType: 'node', key: 'D', text: ['Disconnect'], selector: '#side-panel a[href*="toggleOffline"], .task a[href*="toggleOffline"]' },
-    { pageType: 'node', key: 'B', text: ['Build History'], selector: '#side-panel a[href*="builds"], .task a[href*="builds"]' },
-    { pageType: 'node', key: 'S', text: ['System Information'], selector: '#side-panel a[href*="systemInfo"], .task a[href*="systemInfo"]' },
-    { pageType: 'node', key: 'H', text: ['Agent Config History'], selector: '#side-panel a[href*="nodeConfigHistory"], .task a[href*="nodeConfigHistory"]' },
-    { pageType: 'node', key: 'L', text: ['Log'], selector: '#side-panel a[href*="log"], .task a[href*="log"]' }
-  ];
+  async function navigateToMatchedFrequentView(currentUrl = window.location.href) {
+    const currentJobBaseUrl = getJobBaseUrl(currentUrl);
+    if (!currentJobBaseUrl) return false;
 
-  function getShortcutsForPageType(pageType) {
-    return SHORTCUTS.filter(shortcut => shortcut.pageType === pageType);
-  }
+    const currentJobName = extractJobNameFromUrl(currentJobBaseUrl);
+    const currentSitePrefix = normalizeComparableUrl(getSitePrefixFromAnyJobUrl(currentUrl));
+    if (!currentJobName || !currentSitePrefix) return false;
 
-  function getStickyShortcutsEnabled() {
-    try {
-      return window.sessionStorage.getItem(STICKY_SHORTCUTS_STORAGE_KEY) === 'true';
-    } catch (error) {
-      return false;
+    if (!chrome.runtime?.id) return false;
+
+    const result = await chrome.storage.local.get(['urlHistory']);
+    const urlHistory = sanitizeUrlHistory(result.urlHistory || {});
+
+    const historyJobs = Object.entries(urlHistory)
+      .map(([url, data]) => ({
+        url,
+        lastVisit: Number(data?.lastVisit || 0),
+        count: Number(data?.count || 0)
+      }))
+      .filter((item) => /\/view\/[^\/]+\/job\/[^\/]+\/?$/i.test(item.url))
+      .sort((a, b) => b.lastVisit - a.lastVisit);
+
+    if (historyJobs.length === 0) return false;
+
+    let matchedJob = historyJobs.find((item) => {
+      const frequentJobName = extractJobNameFromUrl(item.url);
+      if (!frequentJobName || frequentJobName !== currentJobName) return false;
+
+      const frequentSitePrefix = normalizeComparableUrl(getSitePrefixFromAnyJobUrl(item.url));
+      return frequentSitePrefix === currentSitePrefix;
+    });
+
+    if (!matchedJob) {
+      matchedJob = historyJobs.find((item) => extractJobNameFromUrl(item.url) === currentJobName);
     }
-  }
 
-  function setStickyShortcutsEnabled(enabled) {
-    try {
-      window.sessionStorage.setItem(STICKY_SHORTCUTS_STORAGE_KEY, enabled ? 'true' : 'false');
-    } catch (error) {
-      // Ignore sessionStorage failures.
-    }
+    if (!matchedJob) return false;
+
+    const viewMatch = String(matchedJob.url).match(/^(https?:\/\/[^?#]+?\/view\/[^\/?#]+)\/job\/[^\/?#]+\/?$/i);
+    if (!viewMatch?.[1]) return false;
+
+    deactivateFMode();
+    window.location.href = `${viewMatch[1].replace(/\/+$/, '')}/`;
+    return true;
   }
 
   // Detect if current page is a Jenkins site (based on configured sites)
   async function isJenkinsSite() {
     try {
-      // Check if extension context is still valid
-      if (!chrome.runtime?.id) {
-        return;
-      }
+      if (!chrome.runtime?.id) return;
 
       const result = await chrome.storage.local.get(['userConfigText']);
       if (result.userConfigText) {
         config = JSON.parse(result.userConfigText);
         const sites = config.sites || {};
         const currentUrl = window.location.href;
-        
-        // Check if current URL matches any configured Jenkins site
+
         for (const [siteName, siteUrl] of Object.entries(sites)) {
           if (currentUrl.startsWith(siteUrl) || currentUrl.includes('jenkins')) {
             return true;
           }
         }
       }
-      
-      // Fallback: check if URL contains 'jenkins'
+
       return window.location.href.includes('jenkins');
     } catch (error) {
       return window.location.href.includes('jenkins');
     }
   }
 
-  // Detect current page type (job or build)
-  function detectPageType() {
-    const url = window.location.href;
-    const { jobBaseUrl, buildBaseUrl } = getJenkinsUrlParts(url);
+  // Check if current page has job/build/node patterns (used for shortcut context)
+  function hasJobUrl() {
+    return !!getJobBaseUrl();
+  }
 
-    // Node page pattern: /computer/nodename/
-    if (/\/computer\/[^\/]+\/?($|#|configure|builds|systemInfo)/.test(url)) {
-      return 'node';
+  function hasBuildUrl() {
+    return !!getBuildBaseUrl();
+  }
+
+  function hasNodeUrl() {
+    return /\/computer\/[^\/]+\/?($|#|configure|builds|systemInfo)/.test(window.location.href);
+  }
+
+  // Find the first matching shortcut for a key by checking if its menu item exists on page
+  function findFirstMatchingShortcut(keyUpper) {
+    const matchingShortcuts = SHORTCUTS.filter(s => s.key.toUpperCase() === keyUpper);
+    for (const shortcut of matchingShortcuts) {
+      if (!shortcut.selector) {
+        // null selector means it's a synthetic shortcut (like Retrigger) - always match
+        return { shortcut, link: null };
+      }
+      const link = findShortcutLinkByConfig(shortcut);
+      if (link) {
+        return { shortcut, link };
+      }
     }
-    
-    // Build page pattern: /job/jobname/buildnumber/ (supports nested jobs like /job/folder/job/name/123/)
-    if (buildBaseUrl) {
-      return 'build';
-    }
-    
-    // Treat any non-build Jenkins job URL as a job page, including action URLs such as /build?delay=0sec.
-    if (jobBaseUrl) {
-      return 'job';
-    }
-    
     return null;
   }
 
-  // Find menu links based on shortcut configuration
-  function findMenuLinks() {
-    const pageType = detectPageType();
-    if (!pageType) return [];
-
-    currentPageType = pageType;
-    const syntheticMenuLinks = ensureSyntheticShortcutMenuItems(pageType);
-    const shortcuts = getShortcutsForPageType(pageType);
-    const foundLinks = [];
-
-    shortcuts.forEach(shortcut => {
-      // Try to find by selector first (skip if selector is null)
-      let link = null;
-      if (shortcut.selector) {
-        link = document.querySelector(shortcut.selector);
-      }
-      
-      // If not found by selector, try to find by text content (case-insensitive)
-      if (!link) {
-        const allLinks = document.querySelectorAll('#side-panel a, .task a, #tasks a');
-        for (const a of allLinks) {
-          const text = a.textContent.trim().toLowerCase();
-          
-          // Check text content
-          const foundByText = shortcut.text.some(t => text.includes(t.toLowerCase()));
-          
-          if (foundByText) {
-            link = a;
-            break;
-          }
-        }
-      }
-
-      if (link) {
-        foundLinks.push({
-          key: shortcut.key,
-          link: link,
-          text: shortcut.text
-        });
-      }
-    });
-
-    syntheticMenuLinks.forEach((item) => {
-      if (!foundLinks.some(existingItem => existingItem.key === item.key)) {
-        foundLinks.push(item);
-      }
-    });
-
-    return foundLinks;
-  }
-
-  // Show keyboard shortcuts hints
-  function showShortcuts() {
-    if (shortcutsActive) return;
-
-    const pageType = detectPageType();
-    if (!pageType) {
-      return;
-    }
-
-    currentPageType = pageType;
-    const links = findMenuLinks();
-    shortcutsActive = true;
-    setStickyShortcutsEnabled(true);
-
-    if (links.length === 0) {
-      return;
-    }
-    
-    // Show context action buttons
-    const reportButton = document.getElementById('jenkins-report-button');
-    if (reportButton) {
-      reportButton.style.display = 'inline-block';
-    }
-    const labelButton = document.getElementById('jenkins-label-button');
-    if (labelButton) {
-      labelButton.style.display = 'inline-block';
-    }
-
-    // Add shortcut hints to each menu item
-    links.forEach(item => {
-      const link = item.link;
-      
-      // Skip if already has a hint
-      if (link.querySelector && link.querySelector('.jenkins-shortcut-hint')) return;
-
-      // Create hint element
-      const hint = document.createElement('span');
-      hint.className = 'jenkins-shortcut-hint';
-      hint.textContent = item.key;
-      hint.title = `Press ${item.key} to navigate`;
-
-      // Find the right position to insert: after icon/image, before text
-      let insertPosition = null;
-      
-      // Look for SVG or IMG elements
-      const iconElements = link.querySelectorAll('svg, img');
-      if (iconElements.length > 0) {
-        // Insert after the last icon
-        insertPosition = iconElements[iconElements.length - 1].nextSibling;
-      } else {
-        // No icon found, insert at the beginning
-        insertPosition = link.firstChild;
-      }
-      
-      if (insertPosition) {
-        link.insertBefore(hint, insertPosition);
-      } else {
-        link.appendChild(hint);
-      }
-    });
-  }
-
-
-
-  // Hide keyboard shortcuts hints
-  function hideShortcuts(options = {}) {
-    const { clearSticky = false } = options;
-
-    if (!shortcutsActive) return;
-
-    const hints = document.querySelectorAll('.jenkins-shortcut-hint');
-    hints.forEach(hint => {
-      // Don't remove hints that are inside URL menu or navigation buttons
-      if (!hint.closest('#jenkins-url-menu') && !hint.closest('#jenkins-nav-buttons')) {
-        hint.remove();
-      }
-    });
-    
-    // Hide context action buttons
-    const reportButton = document.getElementById('jenkins-report-button');
-    if (reportButton) {
-      reportButton.style.display = 'none';
-    }
-    const labelButton = document.getElementById('jenkins-label-button');
-    if (labelButton) {
-      labelButton.style.display = 'none';
-    }
-
-    removeSyntheticShortcutMenuItems();
-
-    shortcutsActive = false;
-
-    if (clearSticky) {
-      setStickyShortcutsEnabled(false);
-    }
-  }
-
   function isElementVisible(element) {
-    if (!element) {
-      return false;
-    }
-
+    if (!element) return false;
     const style = window.getComputedStyle(element);
     return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
   }
 
   function isSectionCollapsed(toggle, content) {
     const details = toggle?.closest('details');
-    if (details) {
-      return !details.open;
-    }
+    if (details) return !details.open;
 
     const expanded = toggle?.getAttribute('aria-expanded');
-    if (expanded === 'false') {
-      return true;
-    }
-    if (expanded === 'true') {
-      return false;
-    }
+    if (expanded === 'false') return true;
+    if (expanded === 'true') return false;
 
-    if (!content) {
-      return false;
-    }
-
+    if (!content) return false;
     return !isElementVisible(content);
   }
 
@@ -388,15 +368,11 @@
     const labelElement = Array.from(document.querySelectorAll('div, span, strong, h1, h2, h3, h4, label')).find((element) => {
       return isBuildExecutorStatusLabel(element.textContent || '');
     });
-    if (!labelElement) {
-      return null;
-    }
+    if (!labelElement) return null;
 
     const container = labelElement.closest('details, .jenkins-section, .optionalBlock-container, .optionalBlock, .pane-frame, .section, .row, div');
     const toggle = labelElement.closest(interactiveSelector) || container?.querySelector(interactiveSelector);
-    if (!toggle) {
-      return null;
-    }
+    if (!toggle) return null;
 
     const controlsId = toggle.getAttribute('aria-controls');
     let content = controlsId ? document.getElementById(controlsId) : null;
@@ -413,9 +389,7 @@
   }
 
   function ensureNodeBuildExecutorStatusExpanded() {
-    if (detectPageType() !== 'node') {
-      return;
-    }
+    if (!hasNodeUrl()) return;
 
     const executorsPane = document.getElementById('executors');
     if (executorsPane?.classList.contains('collapsed')) {
@@ -427,13 +401,10 @@
     }
 
     const section = findBuildExecutorStatusSection();
-    if (!section) {
-      return;
-    }
+    if (!section) return;
 
     if (isSectionCollapsed(section.toggle, section.content)) {
       section.toggle.click();
-
       const details = section.toggle.closest('details');
       if (details && !details.open) {
         details.open = true;
@@ -458,22 +429,14 @@
     ];
 
     return Array.from(document.querySelectorAll(menuSelectors.join(', '))).find((element) => {
-      if (!isElementVisible(element)) {
-        return false;
-      }
-
-      if (element.id === 'jenkins-url-menu' || element.closest('#jenkins-url-menu')) {
-        return false;
-      }
-
+      if (!isElementVisible(element)) return false;
+      if (element.id === 'jenkins-url-menu' || element.closest('#jenkins-url-menu')) return false;
       return true;
     }) || null;
   }
 
   function triggerBreadcrumbToggle(toggle) {
-    if (!toggle) {
-      return false;
-    }
+    if (!toggle) return false;
 
     ['mousedown', 'mouseup', 'click'].forEach((eventName) => {
       toggle.dispatchEvent(new MouseEvent(eventName, {
@@ -492,9 +455,7 @@
 
   function toggleBreadcrumbDropdown() {
     const toggles = getBreadcrumbDropdownToggles();
-    if (toggles.length === 0) {
-      return false;
-    }
+    if (toggles.length === 0) return false;
 
     const targetIndex = breadcrumbToggleIndex % toggles.length;
     const openMenu = findVisibleBreadcrumbMenu();
@@ -531,28 +492,18 @@
 
   async function getLastBuildInfo(url = window.location.href) {
     const jobBaseUrl = getJobBaseUrl(url);
-    if (!jobBaseUrl) {
-      return null;
-    }
+    if (!jobBaseUrl) return null;
 
     try {
       const response = await fetch(`${jobBaseUrl}/api/json?tree=lastBuild[number,url]`, { credentials: 'include' });
-      if (!response.ok) {
-        throw new Error(`Failed to load last build info: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Failed to load last build info: ${response.status}`);
 
       const data = await response.json();
       const buildNumber = Number(data?.lastBuild?.number);
-      if (!buildNumber) {
-        return null;
-      }
+      if (!buildNumber) return null;
 
       const buildBaseUrl = String(data?.lastBuild?.url || `${jobBaseUrl}/${buildNumber}`).replace(/\/$/, '');
-      return {
-        jobBaseUrl,
-        buildNumber,
-        buildBaseUrl
-      };
+      return { jobBaseUrl, buildNumber, buildBaseUrl };
     } catch (error) {
       console.log('Failed to resolve last build info:', error);
       return null;
@@ -565,9 +516,7 @@
 
   function getJenkinsSiteUrl(url = window.location.href) {
     const siteInfo = getMatchedSiteInfo(url);
-    if (siteInfo?.siteUrl) {
-      return siteInfo.siteUrl;
-    }
+    if (siteInfo?.siteUrl) return siteInfo.siteUrl;
 
     const originMatch = String(url).match(/^(https?:\/\/[^\/]+(?:\/[^\/]+)?)/i);
     return originMatch ? originMatch[1].replace(/\/$/, '') : null;
@@ -575,9 +524,7 @@
 
   function getNodeUrlFromName(nodeName, siteUrl) {
     const normalizedNodeName = String(nodeName || '').trim();
-    if (!normalizedNodeName || !siteUrl) {
-      return null;
-    }
+    if (!normalizedNodeName || !siteUrl) return null;
 
     const lowerNodeName = normalizedNodeName.toLowerCase();
     if (['built-in node', 'built in node', '(built-in)', 'master', '(master)'].includes(lowerNodeName)) {
@@ -593,91 +540,98 @@
     const buildNumber = getCurrentBuildNumber(url);
     const jobBaseUrl = getJobBaseUrl(url);
 
-    if (!buildBaseUrl || !buildNumber || !jobBaseUrl) {
-      return null;
-    }
+    if (!buildBaseUrl || !buildNumber || !jobBaseUrl) return null;
 
-    return {
-      buildBaseUrl,
-      buildNumber,
-      jobBaseUrl
-    };
+    return { buildBaseUrl, buildNumber, jobBaseUrl };
   }
 
   function navigateToJobConfigure() {
     const jobBaseUrl = getJobBaseUrl();
-    if (!jobBaseUrl) {
-      return false;
-    }
+    if (!jobBaseUrl) return false;
 
-    hideShortcuts();
+    deactivateFMode();
     window.location.href = `${jobBaseUrl}/configure`;
     return true;
   }
 
   function navigateToJobHistory() {
     const jobBaseUrl = getJobBaseUrl();
-    if (!jobBaseUrl) {
-      return false;
-    }
+    if (!jobBaseUrl) return false;
 
-    hideShortcuts();
+    deactivateFMode();
     window.location.href = `${jobBaseUrl}/jobConfigHistory`;
     return true;
   }
 
   async function getTargetBuildBaseUrl(url = window.location.href) {
     const currentBuildInfo = getBuildInfoFromCurrentUrl(url);
-    if (currentBuildInfo?.buildBaseUrl) {
-      return currentBuildInfo.buildBaseUrl;
-    }
+    if (currentBuildInfo?.buildBaseUrl) return currentBuildInfo.buildBaseUrl;
 
     const lastBuildInfo = await getLastBuildInfo(url);
     return lastBuildInfo?.buildBaseUrl || null;
   }
 
-  async function getConsoleToggleUrl(keyUpper, url = window.location.href) {
+  // Console toggle: console -> consoleText -> consoleFull -> console
+  async function getConsoleToggleUrl(url = window.location.href) {
     const targetBuildBaseUrl = await getTargetBuildBaseUrl(url);
-    if (!targetBuildBaseUrl) {
-      return null;
-    }
+    if (!targetBuildBaseUrl) return null;
 
     const buildUrlPattern = escapeRegExp(targetBuildBaseUrl);
 
-    if (keyUpper === 'C') {
-      if (new RegExp(`^${buildUrlPattern}/consoleFull/?(?:[?#].*)?$`, 'i').test(url)) {
-        return `${targetBuildBaseUrl}/console`;
-      }
-
-      if (new RegExp(`^${buildUrlPattern}/console/?(?:[?#].*)?$`, 'i').test(url)) {
-        return `${targetBuildBaseUrl}/consoleFull`;
-      }
-
+    // consoleFull -> console
+    if (new RegExp(`^${buildUrlPattern}/consoleFull/?(?:[?#].*)?$`, 'i').test(url)) {
       return `${targetBuildBaseUrl}/console`;
     }
 
-    if (keyUpper === 'T') {
-      if (new RegExp(`^${buildUrlPattern}/consoleText/?(?:[?#].*)?$`, 'i').test(url)) {
-        return `${targetBuildBaseUrl}${TIMESTAMPS_PATH}`;
-      }
+    // consoleText -> consoleFull
+    if (new RegExp(`^${buildUrlPattern}/consoleText/?(?:[?#].*)?$`, 'i').test(url)) {
+      return `${targetBuildBaseUrl}/consoleFull`;
+    }
 
-      if (new RegExp(`^${buildUrlPattern}/timestamps/?(?:[?#].*)?$`, 'i').test(url)) {
-        return `${targetBuildBaseUrl}/consoleText`;
-      }
-
+    // console -> consoleText
+    if (new RegExp(`^${buildUrlPattern}/console/?(?:[?#].*)?$`, 'i').test(url)) {
       return `${targetBuildBaseUrl}/consoleText`;
     }
 
-    return null;
+    // Default: go to console
+    return `${targetBuildBaseUrl}/console`;
   }
 
-  async function navigateToConsoleShortcut(keyUpper) {
-    const targetUrl = await getConsoleToggleUrl(keyUpper);
-    if (!targetUrl) {
-      return false;
+  async function navigateToConsoleToggle() {
+    const targetUrl = await getConsoleToggleUrl();
+    if (!targetUrl) return false;
+
+    deactivateFMode();
+    window.location.href = targetUrl;
+    return true;
+  }
+
+  // Timestamps toggle: consoleText <-> timestamps
+  async function getTimestampsToggleUrl(url = window.location.href) {
+    const targetBuildBaseUrl = await getTargetBuildBaseUrl(url);
+    if (!targetBuildBaseUrl) return null;
+
+    const buildUrlPattern = escapeRegExp(targetBuildBaseUrl);
+
+    // consoleText -> timestamps
+    if (new RegExp(`^${buildUrlPattern}/consoleText/?(?:[?#].*)?$`, 'i').test(url)) {
+      return `${targetBuildBaseUrl}${TIMESTAMPS_PATH}`;
     }
 
-    hideShortcuts();
+    // timestamps -> consoleText
+    if (url.includes('timestamps')) {
+      return `${targetBuildBaseUrl}/consoleText`;
+    }
+
+    // Default: go to timestamps
+    return `${targetBuildBaseUrl}${TIMESTAMPS_PATH}`;
+  }
+
+  async function navigateToTimestampsToggle() {
+    const targetUrl = await getTimestampsToggleUrl();
+    if (!targetUrl) return false;
+
+    deactivateFMode();
     window.location.href = targetUrl;
     return true;
   }
@@ -688,24 +642,18 @@
 
   async function getBuildNodeUrl(url = window.location.href) {
     const targetBuildInfo = await getTargetBuildInfo(url);
-    if (!targetBuildInfo?.buildBaseUrl) {
-      return null;
-    }
+    if (!targetBuildInfo?.buildBaseUrl) return null;
 
     const buildUrl = `${targetBuildInfo.buildBaseUrl}/`;
     const siteUrl = getJenkinsSiteUrl(targetBuildInfo.buildBaseUrl) || targetBuildInfo.jobBaseUrl;
 
     try {
       const response = await fetch(`${targetBuildInfo.buildBaseUrl}/api/json?tree=builtOn,builtOnStr`, { credentials: 'include' });
-      if (!response.ok) {
-        throw new Error(`Failed to load build node info: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Failed to load build node info: ${response.status}`);
 
       const data = await response.json();
       const nodeUrl = getNodeUrlFromName(data?.builtOn || data?.builtOnStr, siteUrl);
-      if (!nodeUrl) {
-        throw new Error('Build node is missing in API response');
-      }
+      if (!nodeUrl) throw new Error('Build node is missing in API response');
 
       return nodeUrl;
     } catch (error) {
@@ -714,23 +662,17 @@
 
     try {
       const response = await fetch(buildUrl, { credentials: 'include' });
-      if (!response.ok) {
-        throw new Error(`Failed to load build page: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Failed to load build page: ${response.status}`);
 
       const html = await response.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const nodeLink = doc.querySelector('#builtOn a[href*="/computer/"], a[href*="/computer/"], a.model-link[href*="/computer/"]');
       const nodeUrl = resolveActionUrl(nodeLink, buildUrl);
-      if (nodeUrl) {
-        return nodeUrl.replace(/#.*$/, '');
-      }
+      if (nodeUrl) return nodeUrl.replace(/#.*$/, '');
 
       const pageText = doc.body?.textContent || '';
       const builtOnMatch = pageText.match(/built\s+on\s+([^\n\r]+)/i);
-      if (builtOnMatch?.[1]) {
-        return getNodeUrlFromName(builtOnMatch[1].trim(), siteUrl);
-      }
+      if (builtOnMatch?.[1]) return getNodeUrlFromName(builtOnMatch[1].trim(), siteUrl);
 
       return getNodeUrlFromName('built-in node', siteUrl);
     } catch (error) {
@@ -746,16 +688,14 @@
       return true;
     }
 
-    hideShortcuts();
+    deactivateFMode();
     window.location.href = nodeUrl;
     return true;
   }
 
   function getCurrentBuildNumber(url = window.location.href) {
     const buildBaseUrl = getBuildBaseUrl(url);
-    if (!buildBaseUrl) {
-      return null;
-    }
+    if (!buildBaseUrl) return null;
 
     const buildNumberMatch = buildBaseUrl.match(/\/(\d+)$/);
     return buildNumberMatch ? Number(buildNumberMatch[1]) : null;
@@ -763,36 +703,26 @@
 
   function getBuildRelativeSuffix(url = window.location.href) {
     const buildBaseUrl = getBuildBaseUrl(url);
-    if (!buildBaseUrl) {
-      return '';
-    }
-
+    if (!buildBaseUrl) return '';
     return url.slice(buildBaseUrl.length);
   }
 
   async function navigateToPreviousOrNextBuild(keyUpper) {
-    const pageType = detectPageType();
-
-    if (pageType === 'job') {
+    // If on a job page (no build number), go to last build console
+    if (hasJobUrl() && !hasBuildUrl()) {
       const lastBuildInfo = await getLastBuildInfo();
-      if (!lastBuildInfo?.buildBaseUrl) {
-        return false;
-      }
+      if (!lastBuildInfo?.buildBaseUrl) return false;
 
-      hideShortcuts();
+      deactivateFMode();
       window.location.href = `${lastBuildInfo.buildBaseUrl}/console`;
       return true;
     }
 
-    if (pageType !== 'build') {
-      return false;
-    }
+    if (!hasBuildUrl()) return false;
 
     const jobBaseUrl = getJobBaseUrl();
     const currentBuildNumber = getCurrentBuildNumber();
-    if (!jobBaseUrl || !currentBuildNumber) {
-      return false;
-    }
+    if (!jobBaseUrl || !currentBuildNumber) return false;
 
     if (keyUpper === 'N') {
       const lastBuildInfo = await getLastBuildInfo();
@@ -803,12 +733,10 @@
     }
 
     const nextBuildNumber = keyUpper === 'P' ? currentBuildNumber - 1 : currentBuildNumber + 1;
-    if (nextBuildNumber <= 0) {
-      return false;
-    }
+    if (nextBuildNumber <= 0) return false;
 
     const relativeSuffix = getBuildRelativeSuffix();
-    hideShortcuts();
+    deactivateFMode();
     window.location.href = `${jobBaseUrl}/${nextBuildNumber}${relativeSuffix}`;
     return true;
   }
@@ -817,7 +745,7 @@
     return document.getElementById('tasks') || document.querySelector('#side-panel .tasks') || document.getElementById('side-panel');
   }
 
-  function findExistingJobMenuLink(action) {
+  function findExistingMenuLink(action) {
     const definitions = {
       configure: {
         selector: '#side-panel a[href$="/configure"], .task a[href$="/configure"], #tasks a[href$="/configure"]',
@@ -826,25 +754,23 @@
       history: {
         selector: '#side-panel a[href*="jobConfigHistory"], .task a[href*="jobConfigHistory"], #tasks a[href*="jobConfigHistory"]',
         text: ['Job Config History', 'History']
+      },
+      console: {
+        selector: '#side-panel a[href*="/console"], .task a[href*="/console"], .task a[href*="/consoleFull"]',
+        text: ['Console Output', '콘솔 출력']
       }
     };
 
     const definition = definitions[action];
-    if (!definition) {
-      return null;
-    }
+    if (!definition) return null;
 
     const directLink = document.querySelector(definition.selector);
-    if (directLink) {
-      return directLink;
-    }
+    if (directLink) return directLink;
 
     const allLinks = document.querySelectorAll('#side-panel a, .task a, #tasks a');
     for (const link of allLinks) {
       const text = link.textContent.trim();
-      if (definition.text.some(value => text.includes(value))) {
-        return link;
-      }
+      if (definition.text.some(value => text.includes(value))) return link;
     }
 
     return null;
@@ -854,68 +780,41 @@
     document.querySelectorAll(SYNTHETIC_SHORTCUT_MENU_SELECTOR).forEach((element) => element.remove());
   }
 
-  function ensureSyntheticShortcutMenuItems(pageType) {
-    if (pageType !== 'job' && pageType !== 'build') {
+  function ensureSyntheticShortcutMenuItems() {
+    if (!getJobBaseUrl()) {
       removeSyntheticShortcutMenuItems();
       return [];
     }
 
-    if (!getJobBaseUrl()) {
-      return [];
-    }
-
     const container = getShortcutMenuContainer();
-    if (!container) {
-      return [];
-    }
+    if (!container) return [];
 
     const foundLinks = [];
-    const configureLink = pageType === 'job' ? findExistingJobMenuLink('configure') : null;
+    const configureLink = findExistingMenuLink('configure');
     if (configureLink) {
-      foundLinks.push({
-        key: 'X',
-        link: configureLink,
-        text: ['Configure']
-      });
+      foundLinks.push({ key: 'X', link: configureLink, text: ['Configure'] });
     }
 
-    const historyLink = pageType === 'job' ? findExistingJobMenuLink('history') : null;
+    const historyLink = findExistingMenuLink('history');
     if (historyLink) {
-      foundLinks.push({
-        key: 'H',
-        link: historyLink,
-        text: ['History']
-      });
+      foundLinks.push({ key: 'H', link: historyLink, text: ['History'] });
     }
 
     const syntheticDefinitions = [
       {
         key: 'R',
         label: 'Retrigger > Retry > Rebuild',
-        title: 'Press R to try retrigger, then retry, then rebuild for the last build',
+        title: 'Press R to try retrigger, then retry, then rebuild',
         action: 'retry-chain',
-        onClick: async () => navigateToLastBuildRetryOrRebuild()
+        onClick: async () => navigateToCurrentOrLastBuildRetryOrRebuild()
       },
-      ...(pageType === 'build' ? [{
+      // Show Configure/History shortcut if on a build page
+      ...(hasBuildUrl() ? [{
         key: 'X/H',
         label: 'Configure/History',
         title: 'Press X for configure and H for history',
         action: 'job-configure-history',
         onClick: async () => navigateToJobConfigure()
-      }] : []),
-      ...(pageType === 'job' && !configureLink ? [{
-        key: 'X',
-        label: 'Configure',
-        title: 'Press X to open the job configure page',
-        action: 'job-configure',
-        onClick: async () => navigateToJobConfigure()
-      }] : []),
-      ...(pageType === 'job' && !historyLink ? [{
-        key: 'H',
-        label: 'History',
-        title: 'Press H to open the job config history page',
-        action: 'job-history',
-        onClick: async () => navigateToJobHistory()
       }] : []),
       {
         key: 'P/N/O',
@@ -923,7 +822,15 @@
         title: 'Press P for previous, N for next, and O for node navigation',
         action: 'previous-next-node',
         onClick: async () => navigateToPreviousOrNextBuild('P')
-      }
+      },
+      // Show C/T shortcut if no console link is found but we are on a job page
+      ...(!findExistingMenuLink('console') && hasJobUrl() ? [{
+        key: 'C/T',
+        label: 'Console / Timestamps',
+        title: 'Press C for console toggle, T for timestamps toggle',
+        action: 'console-toggle',
+        onClick: async () => navigateToConsoleToggle()
+      }] : [])
     ];
 
     const syntheticLinks = syntheticDefinitions.map((definition) => {
@@ -949,11 +856,7 @@
         container.appendChild(wrapper);
       }
 
-      return {
-        key: definition.key,
-        link,
-        text: [definition.label]
-      };
+      return { key: definition.key, link, text: [definition.label] };
     });
 
     return foundLinks.concat(syntheticLinks);
@@ -966,9 +869,7 @@
 
   function showActionNotice(message) {
     const existingNotice = document.getElementById('jenkins-action-notice');
-    if (existingNotice) {
-      existingNotice.remove();
-    }
+    if (existingNotice) existingNotice.remove();
 
     if (actionNoticeTimer) {
       clearTimeout(actionNoticeTimer);
@@ -1004,34 +905,11 @@
 
   function navigateWithNotice(url, message) {
     showActionNotice(message);
-    hideShortcuts();
+    deactivateFMode();
     window.setTimeout(() => {
       window.location.href = url;
     }, 1000);
     return true;
-  }
-
-  function restoreStickyShortcuts() {
-    const pageType = detectPageType();
-
-    if (!getStickyShortcutsEnabled() || !pageType) {
-      if (shortcutsActive) {
-        hideShortcuts();
-      }
-      return;
-    }
-
-    ensureNodeBuildExecutorStatusExpanded();
-
-    if (shortcutsActive) {
-      hideShortcuts();
-    }
-
-    showShortcuts();
-  }
-
-  function hasDirectShortcut(pageType, keyUpper) {
-    return Boolean(getShortcutsForPageType(pageType).some(shortcut => shortcut.key.toUpperCase() === keyUpper));
   }
 
   function getMatchedSiteInfo(url = window.location.href) {
@@ -1081,15 +959,13 @@
   }
 
   function activateLink(link) {
-    if (!link) {
-      return false;
-    }
+    if (!link) return false;
 
     if (link.onclick) {
       try {
         const result = link.onclick.call(link, new MouseEvent('click'));
         if (result === false) {
-          hideShortcuts();
+          deactivateFMode();
           return true;
         }
       } catch (e) {
@@ -1103,7 +979,7 @@
       link.click();
     }
 
-    hideShortcuts();
+    deactivateFMode();
     return true;
   }
 
@@ -1129,8 +1005,8 @@
       `label_page.html?server=${encodeURIComponent(siteInfo.server)}&site=${encodeURIComponent(siteInfo.siteUrl)}`
     );
 
-    hideShortcuts();
-    
+    deactivateFMode();
+
     try {
       await chrome.runtime.sendMessage({
         type: 'openLabelPage',
@@ -1139,44 +1015,39 @@
     } catch (error) {
       console.error('Failed to open Jenkins Labels page:', error);
     }
-    
+
     return true;
   }
 
-  async function navigateToLastBuildRetryOrRebuild() {
+  async function navigateToCurrentOrLastBuildRetryOrRebuild() {
     const jobBaseUrl = getJobBaseUrl();
-    if (!jobBaseUrl) {
-      return false;
+    if (!jobBaseUrl) return false;
+
+    let buildBaseUrl;
+    if (hasBuildUrl()) {
+      buildBaseUrl = getBuildBaseUrl();
+    } else {
+      const lastBuildInfo = await getLastBuildInfo();
+      if (!lastBuildInfo?.buildBaseUrl) return false;
+      buildBaseUrl = lastBuildInfo.buildBaseUrl;
     }
 
-    const lastBuildInfo = await getLastBuildInfo();
-    if (!lastBuildInfo?.buildBaseUrl) {
-      return false;
-    }
-
-    const buildUrl = `${lastBuildInfo.buildBaseUrl}/`;
+    const buildUrl = `${buildBaseUrl}/`;
     const rebuildFallbackUrl = `${buildUrl}rebuild/parameterized`;
 
     try {
       const response = await fetch(buildUrl, { credentials: 'include' });
-      if (!response.ok) {
-        throw new Error(`Failed to load build page: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Failed to load build page: ${response.status}`);
 
       const html = await response.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
       const retriggerLink = doc.querySelector('#side-panel a[href*="retrigger"], .task a[href*="retrigger"], #tasks a[href*="retrigger"]');
       const retriggerUrl = resolveActionUrl(retriggerLink, buildUrl);
-      if (retriggerUrl) {
-        return navigateWithNotice(retriggerUrl, 'Executed via Retrigger');
-      }
+      if (retriggerUrl) return navigateWithNotice(retriggerUrl, 'Executed via Retrigger');
 
       const retryLink = doc.querySelector('#side-panel a[href*="retry"], .task a[href*="retry"], #tasks a[href*="retry"]');
       const retryUrl = resolveActionUrl(retryLink, buildUrl);
-
-      if (retryUrl) {
-        return navigateWithNotice(retryUrl, 'Executed via Retry');
-      }
+      if (retryUrl) return navigateWithNotice(retryUrl, 'Executed via Retry');
     } catch (error) {
       console.log('Failed to inspect build retry action, falling back to rebuild:', error);
     }
@@ -1184,66 +1055,227 @@
     return navigateWithNotice(rebuildFallbackUrl, 'Retrigger/Retry unavailable. Executed via Rebuild');
   }
 
+  // ========== F-Mode Management ==========
+
+  function activateFMode() {
+    if (fModeActive) return;
+    fModeActive = true;
+    ensureNodeBuildExecutorStatusExpanded();
+    showShortcuts();
+    showUrlMenu();
+    updateFButtonState();
+  }
+
+  function deactivateFMode() {
+    if (!fModeActive) return;
+    fModeActive = false;
+    hideShortcuts();
+    hideUrlMenu();
+    updateFButtonState();
+  }
+
+  function toggleFMode() {
+    if (fModeActive) {
+      deactivateFMode();
+    } else {
+      activateFMode();
+    }
+  }
+
+  function updateFButtonState() {
+    const toggleButton = document.getElementById('jenkins-toggle-f-button');
+    if (toggleButton) {
+      toggleButton.style.background = fModeActive
+        ? 'linear-gradient(to bottom, #e55050 0%, #c03030 100%)'
+        : 'linear-gradient(to bottom, #4a90e2 0%, #357abd 100%)';
+    }
+  }
+
   // Navigate to menu by shortcut key
   async function navigateByShortcut(key) {
-    if (!shortcutsActive) return false;
-
-    const pageType = currentPageType;
-    if (!pageType) return false;
+    if (!fModeActive) return false;
 
     const keyUpper = key.toUpperCase();
 
-    if ((pageType === 'job' || pageType === 'build') && keyUpper === 'R') {
-      return navigateToLastBuildRetryOrRebuild();
+    // R key: Retrigger/Retry/Rebuild
+    if (keyUpper === 'R' && hasJobUrl()) {
+      return navigateToCurrentOrLastBuildRetryOrRebuild();
     }
 
-    if ((pageType === 'job' || pageType === 'build') && keyUpper === 'X') {
-      return navigateToJobConfigure();
+    // X key: Configure (always job configure)
+    if (keyUpper === 'X') {
+      if (hasJobUrl()) return navigateToJobConfigure();
+      return false;
     }
 
-    if ((pageType === 'job' || pageType === 'build') && keyUpper === 'H') {
-      return navigateToJobHistory();
+    // H key: History
+    if (keyUpper === 'H') {
+      const match = findFirstMatchingShortcut('H');
+      if (match?.link) return activateLink(match.link);
+      if (hasJobUrl()) return navigateToJobHistory();
+      return false;
     }
 
-    if ((pageType === 'job' || pageType === 'build') && (keyUpper === 'C' || keyUpper === 'T')) {
-      return navigateToConsoleShortcut(keyUpper);
+    // C key: Console toggle (console -> consoleText -> consoleFull)
+    if (keyUpper === 'C') {
+      return navigateToConsoleToggle();
     }
 
-    if ((pageType === 'job' || pageType === 'build') && (keyUpper === 'P' || keyUpper === 'N')) {
+    // T key: Timestamps toggle (consoleText <-> timestamps)
+    if (keyUpper === 'T') {
+      return navigateToTimestampsToggle();
+    }
+
+    // P/N key: Previous/Next build
+    if (keyUpper === 'P' || keyUpper === 'N') {
       return navigateToPreviousOrNextBuild(keyUpper);
     }
 
-    if ((pageType === 'job' || pageType === 'build') && keyUpper === 'O') {
+    // O key: Navigate to build node
+    if (keyUpper === 'O') {
       return navigateToBuildNode();
     }
 
-    if (pageType === 'node' && keyUpper === 'Z') {
-      return await triggerNodeLabels();
-    }
-
-    const shortcuts = getShortcutsForPageType(pageType);
-    const shortcut = shortcuts.find(s => s.key.toUpperCase() === keyUpper);
-    
-    if (!shortcut) {
-      console.log(`No shortcut found for key: ${keyUpper}`);
+    // Z key: z-report on job pages, labels on node pages
+    if (keyUpper === 'Z') {
+      if (hasNodeUrl()) {
+        return await triggerNodeLabels();
+      }
+      if (hasJobUrl()) {
+        await showStatisticsReport();
+        return true;
+      }
       return false;
     }
-    
-    console.log(`Found shortcut for ${keyUpper}:`, shortcut);
 
-    const link = findShortcutLinkByConfig(shortcut);
-    if (link) {
-      console.log('Navigating to:', link.href);
-      return activateLink(link);
+    // For all other keys, find first matching shortcut
+    const match = findFirstMatchingShortcut(keyUpper);
+    if (match) {
+      if (match.link) {
+        return activateLink(match.link);
+      }
+      // Synthetic shortcut with null selector was matched
+      return false;
     }
 
-    console.log('Link not found for shortcut:', key);
+    console.log(`No shortcut found for key: ${keyUpper}`);
     return false;
   }
 
+  // ========== Shortcut Display ==========
+
+  // Find menu links based on shortcut configuration
+  function findMenuLinks() {
+    const syntheticMenuLinks = ensureSyntheticShortcutMenuItems();
+    const foundLinks = [];
+    const usedKeys = new Set();
+
+    SHORTCUTS.forEach(shortcut => {
+      const keyUpper = shortcut.key.toUpperCase();
+      // Skip if we already found a link for this key
+      if (usedKeys.has(keyUpper)) return;
+
+      let link = null;
+      if (shortcut.selector) {
+        link = document.querySelector(shortcut.selector);
+      }
+
+      if (!link) {
+        const allLinks = document.querySelectorAll('#side-panel a, .task a, #tasks a');
+        for (const a of allLinks) {
+          const text = a.textContent.trim().toLowerCase();
+          const foundByText = shortcut.text.some(t => text.includes(t.toLowerCase()));
+          if (foundByText) {
+            link = a;
+            break;
+          }
+        }
+      }
+
+      if (link) {
+        foundLinks.push({ key: shortcut.key, link: link, text: shortcut.text });
+        usedKeys.add(keyUpper);
+      }
+    });
+
+    syntheticMenuLinks.forEach((item) => {
+      if (!foundLinks.some(existingItem => existingItem.key === item.key)) {
+        foundLinks.push(item);
+      }
+    });
+
+    return foundLinks;
+  }
+
+  // Show keyboard shortcuts hints
+  function showShortcuts() {
+    const links = findMenuLinks();
+
+    if (links.length === 0) return;
+
+    // Show context action buttons
+    const reportButton = document.getElementById('jenkins-report-button');
+    if (reportButton) {
+      reportButton.style.display = 'inline-block';
+    }
+    const labelButton = document.getElementById('jenkins-label-button');
+    if (labelButton) {
+      labelButton.style.display = 'inline-block';
+    }
+
+    // Add shortcut hints to each menu item
+    links.forEach(item => {
+      const link = item.link;
+
+      if (link.querySelector && link.querySelector('.jenkins-shortcut-hint')) return;
+
+      const hint = document.createElement('span');
+      hint.className = 'jenkins-shortcut-hint';
+      hint.textContent = item.key;
+      hint.title = `Press ${item.key} to navigate`;
+
+      let insertPosition = null;
+      const iconElements = link.querySelectorAll('svg, img');
+      if (iconElements.length > 0) {
+        insertPosition = iconElements[iconElements.length - 1].nextSibling;
+      } else {
+        insertPosition = link.firstChild;
+      }
+
+      if (insertPosition) {
+        link.insertBefore(hint, insertPosition);
+      } else {
+        link.appendChild(hint);
+      }
+    });
+  }
+
+  // Hide keyboard shortcuts hints
+  function hideShortcuts() {
+    const hints = document.querySelectorAll('.jenkins-shortcut-hint');
+    hints.forEach(hint => {
+      if (!hint.closest('#jenkins-url-menu') && !hint.closest('#jenkins-nav-buttons')) {
+        hint.remove();
+      }
+    });
+
+    // Hide context action buttons
+    const reportButton = document.getElementById('jenkins-report-button');
+    if (reportButton) {
+      reportButton.style.display = 'none';
+    }
+    const labelButton = document.getElementById('jenkins-label-button');
+    if (labelButton) {
+      labelButton.style.display = 'none';
+    }
+
+    removeSyntheticShortcutMenuItems();
+  }
+
+  // ========== URL Menu ==========
+
   // Shorten URL for display
   function shortenUrl(url, maxWidth) {
-    // Create a temporary element to measure width
     const tempSpan = document.createElement('span');
     tempSpan.style.visibility = 'hidden';
     tempSpan.style.position = 'absolute';
@@ -1252,15 +1284,12 @@
     tempSpan.style.fontFamily = 'Arial, sans-serif';
     tempSpan.textContent = url;
     document.body.appendChild(tempSpan);
-    
+
     const fullWidth = tempSpan.offsetWidth;
     document.body.removeChild(tempSpan);
-    
-    if (fullWidth <= maxWidth) {
-      return url;
-    }
-    
-    // Step 1: If URL has /view/xxx/job/yyy pattern, shorten to https://~~~/job/yyy
+
+    if (fullWidth <= maxWidth) return url;
+
     const viewJobMatch = url.match(/^(https?:\/\/)(.+?\/view\/[^\/]+)(\/job\/.*)$/);
     if (viewJobMatch) {
       const shortened1 = viewJobMatch[1] + '~~~' + viewJobMatch[3];
@@ -1268,13 +1297,9 @@
       document.body.appendChild(tempSpan);
       const width1 = tempSpan.offsetWidth;
       document.body.removeChild(tempSpan);
-      
-      if (width1 <= maxWidth) {
-        return shortened1;
-      }
+      if (width1 <= maxWidth) return shortened1;
     }
-    
-    // Step 2: If URL has /job/ only (no /view/), shorten between // and /job
+
     const jobMatch = url.match(/^(https?:\/\/)(.+?)(\/job\/.*)$/);
     if (jobMatch) {
       const shortened2 = jobMatch[1] + '~~~' + jobMatch[3];
@@ -1282,93 +1307,72 @@
       document.body.appendChild(tempSpan);
       const width2 = tempSpan.offsetWidth;
       document.body.removeChild(tempSpan);
-      
-      if (width2 <= maxWidth) {
-        return shortened2;
-      }
-      
-      // Step 3: If still too long, show only ~~~/jobname
+
+      if (width2 <= maxWidth) return shortened2;
+
       const jobnameMatch = jobMatch[3].match(/\/job\/([^\/]+)/);
-      if (jobnameMatch) {
-        const shortened3 = '~~~/' + jobnameMatch[1];
-        return shortened3;
-      }
-      
+      if (jobnameMatch) return '~~~/' + jobnameMatch[1];
       return shortened2;
     }
-    
-    // Fallback: just show domain and last part
+
     const fallbackMatch = url.match(/^(https?:\/\/)(.+?)(\/.+)$/);
-    if (fallbackMatch) {
-      return fallbackMatch[1] + '~~~' + fallbackMatch[3];
-    }
-    
+    if (fallbackMatch) return fallbackMatch[1] + '~~~' + fallbackMatch[3];
+
     return url;
   }
 
   // Get top visited URLs from storage
   async function getTopVisitedUrls() {
     try {
-      // Check if extension context is still valid
-      if (!chrome.runtime?.id) {
-        console.log('Extension context invalidated, please reload the page');
-        return { views: [], jobs: [], recentJobs: [] };
-      }
-      
+      if (!chrome.runtime?.id) return { views: [], jobs: [], recentJobs: [] };
+
       const result = await chrome.storage.local.get(['urlHistory']);
       const urlHistory = result.urlHistory || {};
-      
+
       const entries = Object.entries(urlHistory);
-      
-      // Extract unique views from all URLs
-      const viewMap = new Map(); // url -> count
-      const jobsWithData = []; // Array of {url, count, lastVisit}
-      
+      const viewMap = new Map();
+      const jobsWithData = [];
+
       entries.forEach(([url, data]) => {
-        // Extract view: /view/xxx/ pattern (before /job/)
         const viewMatch = url.match(/(https?:\/\/.+?\/view\/[^\/]+\/)/);
         if (viewMatch) {
           const viewUrl = viewMatch[1];
           if (viewMap.has(viewUrl)) {
             const existing = viewMap.get(viewUrl);
-            viewMap.set(viewUrl, { 
-              count: existing.count + data.count, 
+            viewMap.set(viewUrl, {
+              count: existing.count + data.count,
               lastVisit: Math.max(existing.lastVisit, data.lastVisit)
             });
           } else {
             viewMap.set(viewUrl, { count: data.count, lastVisit: data.lastVisit });
           }
         }
-        
-        // Jobs: URLs matching job pattern (ending with /job/jobname)
-        if (url.match(/\/job\/[^\/]+\/?$/)) {
+
+        if (url.match(/\/view\/[^\/]+\/job\/[^\/]+\/?$/)) {
           jobsWithData.push({ url, count: data.count, lastVisit: data.lastVisit });
         }
       });
-      
-      // Convert views to array and sort by count (ascending, so highest is at bottom)
+
       const views = Array.from(viewMap.entries())
         .map(([url, data]) => ({ url, count: data.count }))
-        .sort((a, b) => a.count - b.count)  // Ascending order
-        .slice(-4);  // Take last 4 (highest at bottom)
-      
-      // Top 5 jobs by count
+        .sort((a, b) => a.count - b.count)
+        .slice(-4);
+
       const topJobs = [...jobsWithData]
         .sort((a, b) => b.count - a.count)
         .slice(0, 5);
-      
+
       const topJobUrls = new Set(topJobs.map(j => j.url));
-      
-      // Recent 3 jobs (excluding top jobs)
+
       const recentJobs = [...jobsWithData]
         .filter(j => !topJobUrls.has(j.url))
-        .sort((a, b) => a.lastVisit - b.lastVisit)  // Ascending by lastVisit
-        .slice(-3);  // Take last 3 (most recent at bottom)
-      
-      return { 
-        views, 
-        jobs: topJobs.reverse(),  // Reverse so highest is at bottom
-        recentJobs 
+        .sort((a, b) => a.lastVisit - b.lastVisit)
+        .slice(-3);
+
+      return {
+        views,
+        jobs: topJobs.reverse(),
+        recentJobs
       };
     } catch (error) {
       console.error('Failed to get URL history:', error);
@@ -1379,23 +1383,21 @@
   // Show URL menu
   async function showUrlMenu() {
     if (urlMenuVisible) return;
-    
-    // Check if extension context is still valid
+
     if (!chrome.runtime?.id) {
       alert('Extension was reloaded. Please refresh this page (F5) to use the URL menu.');
       return;
     }
-    
+
     const topUrls = await getTopVisitedUrls();
-    
+
     if (topUrls.views.length === 0 && topUrls.jobs.length === 0 && topUrls.recentJobs.length === 0) {
       console.log('No URL history available');
       return;
     }
-    
+
     urlMenuVisible = true;
-    
-    // Create menu container
+
     const menu = document.createElement('div');
     menu.id = 'jenkins-url-menu';
     menu.style.cssText = `
@@ -1412,24 +1414,23 @@
       box-sizing: border-box;
       font-family: Arial, sans-serif;
     `;
-    
-    // Create content
-    let content = '<h2 style="margin-top: 0; color: #00008B; font-size: 15px;">Recent Views</h2>';
-    
+
+    let content = '<h2 style="margin-top: 0; color: #000; font-size: 15px;">Recent Views</h2>';
+
     if (topUrls.views.length > 0) {
       content += '<div style="margin-bottom: 30px;">';
       topUrls.views.forEach(item => {
         const displayUrl = shortenUrl(item.url, window.innerWidth * 0.35);
         content += `
-          <div class="url-item view-item" data-url="${item.url}" style="
+          <div class="url-item view-item" data-url="${item.url}" data-bg="rgba(128, 128, 0, 0.6)" data-hover="rgba(107, 142, 35, 0.8)" style="
             padding: 10px;
             margin: 8px 0;
-            background: rgba(160, 160, 160, 0.5);
+            background: rgba(128, 128, 0, 0.6);
             border-radius: 4px;
             cursor: pointer;
             transition: background 0.2s;
             word-break: break-all;
-            color: #00008B;
+            color: #fff;
           ">
             <div style="font-size: 14px;">${displayUrl}</div>
           </div>
@@ -1437,72 +1438,67 @@
       });
       content += '</div>';
     }
-    
-    content += '<h2 style="color: #00008B; font-size: 15px;">Recent Jobs</h2>';
-    
+
+    content += '<h2 style="color: #000; font-size: 15px;">Frequent Jobs</h2>';
+
     if (topUrls.jobs.length > 0) {
       content += '<div>';
       topUrls.jobs.forEach(item => {
         const displayUrl = shortenUrl(item.url, window.innerWidth * 0.35);
         content += `
-          <div class="url-item job-item" data-url="${item.url}" style="
-            padding: 10px;
+          <div class="url-item job-item frequent-job-item" data-url="${item.url}" data-bg="rgba(0, 139, 139, 0.6)" data-hover="rgba(0, 111, 111, 0.8)" style="
+            padding: 10px 52px 10px 10px;
             margin: 8px 0;
-            background: rgba(160, 160, 160, 0.5);
+            background: rgba(0, 139, 139, 0.6);
             border-radius: 4px;
             cursor: pointer;
             transition: background 0.2s;
             word-break: break-all;
-            color: #00008B;
+            color: #fff;
             position: relative;
           ">
-            <div style="position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #999; z-index: 1;"></div>
             <div style="font-size: 14px; position: relative; z-index: 2;">${displayUrl}</div>
+            <div style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 3; width: 26px; height: 20px; line-height: 20px; text-align: center; border: 1px solid #000; border-radius: 2px; background: #fff; color: #000; font-size: 13px; font-weight: bold; font-family: 'Courier New', monospace;">&gt;_</div>
           </div>
         `;
       });
       content += '</div>';
     }
-    
-    // Add separator if we have both top jobs and recent jobs
-    if (topUrls.jobs.length > 0 && topUrls.recentJobs.length > 0) {
-      content += '<hr style="border: none; border-top: 1px dashed #888; margin: 15px 0;">';
-    }
-    
-    // Show recent jobs (excluding top jobs)
+
     if (topUrls.recentJobs.length > 0) {
+      content += '<h2 style="color: #000; font-size: 15px; margin-top: 18px;">Recent Jobs</h2>';
       content += '<div>';
       topUrls.recentJobs.forEach(item => {
         const displayUrl = shortenUrl(item.url, window.innerWidth * 0.35);
         content += `
-          <div class="url-item job-item" data-url="${item.url}" style="
-            padding: 10px;
+          <div class="url-item job-item recent-job-item" data-url="${item.url}" data-bg="rgba(70, 130, 180, 0.6)" data-hover="rgba(60, 111, 153, 0.8)" style="
+            padding: 10px 52px 10px 10px;
             margin: 8px 0;
-            background: rgba(160, 160, 160, 0.5);
+            background: rgba(70, 130, 180, 0.6);
             border-radius: 4px;
             cursor: pointer;
             transition: background 0.2s;
             word-break: break-all;
-            color: #00008B;
+            color: #fff;
             position: relative;
           ">
-            <div style="position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #999; z-index: 1;"></div>
             <div style="font-size: 14px; position: relative; z-index: 2;">${displayUrl}</div>
+            <div style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 3; width: 26px; height: 20px; line-height: 20px; text-align: center; border: 1px solid #000; border-radius: 2px; background: #fff; color: #000; font-size: 13px; font-weight: bold; font-family: 'Courier New', monospace;">&gt;_</div>
           </div>
         `;
       });
       content += '</div>';
     }
-    
+
     menu.innerHTML = content;
-    
-    // Add click handlers for view items (full click to navigate)
+
+    // Add click handlers for view items
     menu.querySelectorAll('.view-item').forEach(item => {
       item.addEventListener('mouseenter', (e) => {
-        e.currentTarget.style.background = 'rgba(140, 140, 140, 0.7)';
+        e.currentTarget.style.background = e.currentTarget.getAttribute('data-hover') || 'rgba(107, 142, 35, 0.8)';
       });
       item.addEventListener('mouseleave', (e) => {
-        e.currentTarget.style.background = 'rgba(160, 160, 160, 0.5)';
+        e.currentTarget.style.background = e.currentTarget.getAttribute('data-bg') || 'rgba(128, 128, 0, 0.6)';
       });
       item.addEventListener('click', (e) => {
         const url = e.currentTarget.getAttribute('data-url');
@@ -1512,160 +1508,133 @@
         }
       });
     });
-    
+
     // Add click handlers for job items (split click: left=job, right=console)
     menu.querySelectorAll('.job-item').forEach(item => {
       item.addEventListener('mouseenter', (e) => {
-        e.currentTarget.style.background = 'rgba(140, 140, 140, 0.7)';
+        e.currentTarget.style.background = e.currentTarget.getAttribute('data-hover') || 'rgba(0, 111, 111, 0.8)';
       });
       item.addEventListener('mouseleave', (e) => {
-        e.currentTarget.style.background = 'rgba(160, 160, 160, 0.5)';
+        e.currentTarget.style.background = e.currentTarget.getAttribute('data-bg') || 'rgba(0, 139, 139, 0.6)';
       });
       item.addEventListener('click', async (e) => {
         const url = e.currentTarget.getAttribute('data-url');
         if (url) {
-          // Calculate click position relative to the element
           const rect = e.currentTarget.getBoundingClientRect();
           const clickX = e.clientX - rect.left;
           const elementWidth = rect.width;
-          
+
           let targetUrl = url;
-          
-          // If clicked on right half (50%), open the resolved last build console
+
           if (clickX > elementWidth / 2) {
             const lastBuildInfo = await getLastBuildInfo(url);
-            if (!lastBuildInfo?.buildBaseUrl) {
-              return;
-            }
-
+            if (!lastBuildInfo?.buildBaseUrl) return;
             targetUrl = `${lastBuildInfo.buildBaseUrl}/console`;
-            console.log('Right half clicked - navigating to console:', targetUrl);
-          } else {
-            console.log('Left half clicked - navigating to job:', targetUrl);
           }
-          
+
           window.location.href = targetUrl;
           hideUrlMenu();
         }
       });
     });
-    
+
     document.body.appendChild(menu);
   }
 
   // Hide URL menu
   function hideUrlMenu() {
     if (!urlMenuVisible) return;
-    
+
     const menu = document.getElementById('jenkins-url-menu');
-    if (menu) {
-      menu.remove();
-    }
-    
+    if (menu) menu.remove();
+
     urlMenuVisible = false;
-    console.log('URL menu hidden');
   }
 
-  // Fetch and display statistics report
+  // ========== Statistics Report ==========
+
   async function showStatisticsReport() {
     try {
-      // Get current job URL from page (supports nested jobs like /job/folder/job/name/)
       const jobBaseUrl = getJobBaseUrl();
-      
+
       if (!jobBaseUrl) {
         alert('Cannot determine job URL. Please navigate to a Jenkins job page.');
         return;
       }
 
       const apiUrl = jobBaseUrl + '/api/json?tree=fullDisplayName,url,buildable,queueItem,allBuilds[number,building,timestamp,duration,result,url,displayName,description]';
-      
-      
-      // Fetch data from Jenkins API
+
       const response = await fetch(apiUrl);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch data: ${response.status}`);
-      }
-      
+
+      if (!response.ok) throw new Error(`Failed to fetch data: ${response.status}`);
+
       const data = await response.json();
-      
-      // Open new tab with statistics report
+
       const reportWindow = window.open('', '_blank');
-      
+
       if (!reportWindow) {
         alert('Please allow popups to view the statistics report.');
         return;
       }
-      
-      // Generate report HTML
+
       const html = generateStatisticsReportHtml(data, jobBaseUrl);
-      
-      // Use Blob URL to avoid CSP issues
       const blob = new Blob([html], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
-      
+
       reportWindow.location.href = url;
-      
+
     } catch (error) {
       console.error('Failed to generate statistics report:', error);
       alert(`Failed to generate statistics report: ${error.message}`);
     }
   }
 
-  // Generate statistics report HTML
   function generateStatisticsReportHtml(data, jobBaseUrl) {
     const allBuilds = data.allBuilds || [];
-    
-    // Calculate statistics
+
     const totalBuilds = allBuilds.length;
     const successBuilds = allBuilds.filter(b => b.result === 'SUCCESS').length;
     const failureBuilds = allBuilds.filter(b => b.result === 'FAILURE').length;
     const abortedBuilds = allBuilds.filter(b => b.result === 'ABORTED').length;
-    
+
     const successRate = totalBuilds > 0 ? ((successBuilds / totalBuilds) * 100).toFixed(2) : '0.00';
     const failureRate = totalBuilds > 0 ? ((failureBuilds / totalBuilds) * 100).toFixed(2) : '0.00';
     const abortRate = totalBuilds > 0 ? ((abortedBuilds / totalBuilds) * 100).toFixed(2) : '0.00';
-    
-    // Build range
+
     const buildNumbers = allBuilds.map(b => b.number).filter(n => n);
     const minBuild = buildNumbers.length > 0 ? Math.min(...buildNumbers) : 0;
     const maxBuild = buildNumbers.length > 0 ? Math.max(...buildNumbers) : 0;
     const buildRange = `${minBuild}~${maxBuild} (${totalBuilds})`;
-    
-    // Calculate average durations (all based on SUCCESS builds only)
+
     const successfulDurations = allBuilds
       .filter(b => b.result === 'SUCCESS' && b.duration > 0)
       .map(b => b.duration);
-    
+
     const avgDuration = successfulDurations.length > 0
       ? successfulDurations.reduce((a, b) => a + b, 0) / successfulDurations.length
       : 0;
-    
-    // Success and <= 20 minutes (1200000ms)
+
     const under20min = allBuilds
       .filter(b => b.result === 'SUCCESS' && b.duration > 0 && b.duration <= 1200000)
       .map(b => b.duration);
     const avgUnder20 = under20min.length > 0
       ? under20min.reduce((a, b) => a + b, 0) / under20min.length
       : 0;
-    
-    // Success and 20min~3hours (1200000~10800000ms)
+
     const between20minAnd3h = allBuilds
       .filter(b => b.result === 'SUCCESS' && b.duration > 1200000 && b.duration <= 10800000)
       .map(b => b.duration);
     const avgBetween = between20minAnd3h.length > 0
       ? between20minAnd3h.reduce((a, b) => a + b, 0) / between20minAnd3h.length
       : 0;
-    
-    // Success and >= 3 hours (10800000ms)
+
     const over3h = allBuilds
       .filter(b => b.result === 'SUCCESS' && b.duration > 10800000)
       .map(b => b.duration);
     const avgOver3h = over3h.length > 0
       ? over3h.reduce((a, b) => a + b, 0) / over3h.length
       : 0;
-    
-    // Format duration as HH:MM:SS
+
     const formatDuration = (ms) => {
       if (!ms || ms === 0) return '-';
       const seconds = Math.floor(ms / 1000);
@@ -1674,14 +1643,13 @@
       const secs = seconds % 60;
       return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
-    
-    // Format timestamp
+
     const formatTimestamp = (ts) => {
       if (!ts) return '-';
       const date = new Date(ts);
-      return date.toLocaleString('ko-KR', { 
-        year: 'numeric', 
-        month: '2-digit', 
+      return date.toLocaleString('ko-KR', {
+        year: 'numeric',
+        month: '2-digit',
         day: '2-digit',
         hour: '2-digit',
         minute: '2-digit',
@@ -1689,10 +1657,9 @@
         hour12: false
       });
     };
-    
-    // Get result color
+
     const getResultColor = (result) => {
-      switch(result) {
+      switch (result) {
         case 'SUCCESS': return '#4CAF50';
         case 'FAILURE': return '#f44336';
         case 'ABORTED': return '#9E9E9E';
@@ -1700,14 +1667,13 @@
         default: return '#2196F3';
       }
     };
-    
-    // Generate table rows
+
     const tableRows = allBuilds.map(build => {
       const buildUrl = build.url || `${jobBaseUrl}/${build.number}`;
       const timestampUrl = `${buildUrl}/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog&locale=en`;
       const resultColor = getResultColor(build.result);
       const isBuilding = build.building ? ' class="building-blink"' : '';
-      
+
       return `
         <tr>
           <td style="text-align: center;"${isBuilding}><a href="${buildUrl}" target="_blank" style="color: #1976D2; text-decoration: none;">#${build.number}</a></td>
@@ -1723,7 +1689,7 @@
         </tr>
       `;
     }).join('');
-    
+
     return `
 <!DOCTYPE html>
 <html>
@@ -1731,150 +1697,34 @@
   <meta charset="UTF-8">
   <title>Z-report</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      background-color: #f5f5f5;
-    }
-    .header {
-      background-color: #1976D2;
-      color: white;
-      padding: 20px;
-      border-radius: 5px;
-      margin-bottom: 20px;
-    }
-    .header h1 {
-      margin: 0 0 10px 0;
-      font-size: 24px;
-    }
-    .header-info {
-      font-size: 14px;
-      margin: 5px 0;
-    }
-    .stats-container {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-      flex-wrap: nowrap;
-      overflow-x: auto;
-    }
-    .stat-card {
-      flex: 1;
-      min-width: 140px;
-      background-color: white;
-      padding: 12px;
-      border-radius: 5px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .stat-card h3 {
-      margin: 0 0 8px 0;
-      font-size: 12px;
-      color: #666;
-      white-space: nowrap;
-    }
-    .stat-card .value {
-      font-size: 24px;
-      font-weight: bold;
-      color: #1976D2;
-    }
-    .stat-card .sub-text {
-      font-size: 11px;
-      color: #666;
-      margin-top: 4px;
-    }
-    .table-container {
-      background-color: white;
-      padding: 20px;
-      border-radius: 5px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      overflow-x: auto;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    th {
-      background-color: #1976D2;
-      color: white;
-      padding: 12px;
-      text-align: left;
-      font-weight: bold;
-      position: sticky;
-      top: 0;
-      cursor: pointer;
-      user-select: none;
-    }
-    th:hover {
-      background-color: #1565C0;
-    }
-    td {
-      padding: 10px;
-      border-bottom: 1px solid #ddd;
-    }
-    tr:hover {
-      background-color: #f5f5f5;
-    }
-    @keyframes blink {
-      0%, 50%, 100% { opacity: 1; }
-      25%, 75% { opacity: 0.3; }
-    }
-    .building-blink {
-      animation: blink 2s infinite;
-    }
-    .delete-container {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-left: auto;
-    }
-    .delete-container input {
-      width: 70px;
-      padding: 6px 8px;
-      border: 1px solid #ddd;
-      border-radius: 3px;
-      font-size: 14px;
-      text-align: center;
-    }
-    /* Remove spinner buttons from number inputs */
+    body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+    .header { background-color: #1976D2; color: white; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
+    .header h1 { margin: 0 0 10px 0; font-size: 24px; }
+    .header-info { font-size: 14px; margin: 5px 0; }
+    .stats-container { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: nowrap; overflow-x: auto; }
+    .stat-card { flex: 1; min-width: 140px; background-color: white; padding: 12px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .stat-card h3 { margin: 0 0 8px 0; font-size: 12px; color: #666; white-space: nowrap; }
+    .stat-card .value { font-size: 24px; font-weight: bold; color: #1976D2; }
+    .stat-card .sub-text { font-size: 11px; color: #666; margin-top: 4px; }
+    .table-container { background-color: white; padding: 20px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background-color: #1976D2; color: white; padding: 12px; text-align: left; font-weight: bold; position: sticky; top: 0; cursor: pointer; user-select: none; }
+    th:hover { background-color: #1565C0; }
+    td { padding: 10px; border-bottom: 1px solid #ddd; }
+    tr:hover { background-color: #f5f5f5; }
+    @keyframes blink { 0%, 50%, 100% { opacity: 1; } 25%, 75% { opacity: 0.3; } }
+    .building-blink { animation: blink 2s infinite; }
+    .delete-container { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .delete-container input { width: 70px; padding: 6px 8px; border: 1px solid #ddd; border-radius: 3px; font-size: 14px; text-align: center; }
     .delete-container input[type=number]::-webkit-inner-spin-button,
-    .delete-container input[type=number]::-webkit-outer-spin-button {
-      -webkit-appearance: none;
-      margin: 0;
-    }
-    .delete-container input[type=number] {
-      -moz-appearance: textfield;
-    }
-    .delete-container button {
-      background-color: #f44336;
-      color: white;
-      border: none;
-      padding: 6px 16px;
-      border-radius: 3px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: bold;
-    }
-    .delete-container button:hover {
-      background-color: #d32f2f;
-    }
-    .delete-container button:disabled {
-      background-color: #ccc;
-      cursor: not-allowed;
-    }
-    #deleteStatus {
-      font-size: 12px;
-      color: #666;
-      margin-left: 5px;
-    }
-    .table-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 15px;
-    }
-    .table-header h2 {
-      margin: 0;
-    }
+    .delete-container input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    .delete-container input[type=number] { -moz-appearance: textfield; }
+    .delete-container button { background-color: #f44336; color: white; border: none; padding: 6px 16px; border-radius: 3px; cursor: pointer; font-size: 14px; font-weight: bold; }
+    .delete-container button:hover { background-color: #d32f2f; }
+    .delete-container button:disabled { background-color: #ccc; cursor: not-allowed; }
+    #deleteStatus { font-size: 12px; color: #666; margin-left: 5px; }
+    .table-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
+    .table-header h2 { margin: 0; }
   </style>
 </head>
 <body>
@@ -1885,45 +1735,17 @@
     <div class="header-info"><strong>Buildable:</strong> ${data.buildable !== undefined ? (data.buildable ? 'Yes' : 'No') : 'N/A'}</div>
     <div class="header-info"><strong>Build Range:</strong> ${buildRange}</div>
   </div>
-  
+
   <div class="stats-container">
-    <div class="stat-card">
-      <h3>Success Rate</h3>
-      <div class="value">${successRate}%</div>
-      <div class="sub-text">${successBuilds} / ${totalBuilds}</div>
-    </div>
-    <div class="stat-card">
-      <h3>Failure Rate</h3>
-      <div class="value">${failureRate}%</div>
-      <div class="sub-text">${failureBuilds} / ${totalBuilds}</div>
-    </div>
-    <div class="stat-card">
-      <h3>Abort Rate</h3>
-      <div class="value">${abortRate}%</div>
-      <div class="sub-text">${abortedBuilds} / ${totalBuilds}</div>
-    </div>
-    <div class="stat-card">
-      <h3>Avg (Success)</h3>
-      <div class="value" style="font-size: 18px;">${formatDuration(avgDuration)}</div>
-      <div class="sub-text">${successfulDurations.length} builds</div>
-    </div>
-    <div class="stat-card">
-      <h3>Avg (≤20min)</h3>
-      <div class="value" style="font-size: 18px;">${formatDuration(avgUnder20)}</div>
-      <div class="sub-text">${under20min.length} builds</div>
-    </div>
-    <div class="stat-card">
-      <h3>Avg (20m~3h)</h3>
-      <div class="value" style="font-size: 18px;">${formatDuration(avgBetween)}</div>
-      <div class="sub-text">${between20minAnd3h.length} builds</div>
-    </div>
-    <div class="stat-card">
-      <h3>Avg (≥3h)</h3>
-      <div class="value" style="font-size: 18px;">${formatDuration(avgOver3h)}</div>
-      <div class="sub-text">${over3h.length} builds</div>
-    </div>
+    <div class="stat-card"><h3>Success Rate</h3><div class="value">${successRate}%</div><div class="sub-text">${successBuilds} / ${totalBuilds}</div></div>
+    <div class="stat-card"><h3>Failure Rate</h3><div class="value">${failureRate}%</div><div class="sub-text">${failureBuilds} / ${totalBuilds}</div></div>
+    <div class="stat-card"><h3>Abort Rate</h3><div class="value">${abortRate}%</div><div class="sub-text">${abortedBuilds} / ${totalBuilds}</div></div>
+    <div class="stat-card"><h3>Avg (Success)</h3><div class="value" style="font-size: 18px;">${formatDuration(avgDuration)}</div><div class="sub-text">${successfulDurations.length} builds</div></div>
+    <div class="stat-card"><h3>Avg (≤20min)</h3><div class="value" style="font-size: 18px;">${formatDuration(avgUnder20)}</div><div class="sub-text">${under20min.length} builds</div></div>
+    <div class="stat-card"><h3>Avg (20m~3h)</h3><div class="value" style="font-size: 18px;">${formatDuration(avgBetween)}</div><div class="sub-text">${between20minAnd3h.length} builds</div></div>
+    <div class="stat-card"><h3>Avg (≥3h)</h3><div class="value" style="font-size: 18px;">${formatDuration(avgOver3h)}</div><div class="sub-text">${over3h.length} builds</div></div>
   </div>
-  
+
   <div class="table-container">
     <div class="table-header">
       <h2>All Builds (${totalBuilds})</h2>
@@ -1952,160 +1774,106 @@
       </tbody>
     </table>
   </div>
-  
+
   <div style="margin-top: 20px; text-align: center; color: #666; font-size: 12px;">
     Generated at ${new Date().toLocaleString('ko-KR')}
   </div>
-  
+
   <script>
     document.title = 'Z-report';
-    
+
     const JOB_BASE_URL = '${jobBaseUrl}';
-    let sortDirections = [1, 1, 1, 1, 1, 1]; // 1 for ascending, -1 for descending
-    
-    // Delete builds in range using window.opener postMessage
+    let sortDirections = [1, 1, 1, 1, 1, 1];
+
     async function deleteBuildsInRange() {
       const startBuild = parseInt(document.getElementById('deleteStartBuild').value);
       const endBuild = parseInt(document.getElementById('deleteEndBuild').value);
       const statusEl = document.getElementById('deleteStatus');
       const deleteBtn = document.getElementById('deleteBuildBtn');
-      
-      if (isNaN(startBuild) || isNaN(endBuild)) {
-        alert('Please enter valid build numbers');
-        return;
-      }
-      
-      if (startBuild > endBuild) {
-        alert('Start build number must be less than or equal to end build number');
-        return;
-      }
-      
-      if (!window.opener) {
-        alert('Cannot communicate with parent window. Please open z-report from Jenkins page.');
-        return;
-      }
-      
+
+      if (isNaN(startBuild) || isNaN(endBuild)) { alert('Please enter valid build numbers'); return; }
+      if (startBuild > endBuild) { alert('Start build number must be less than or equal to end build number'); return; }
+      if (!window.opener) { alert('Cannot communicate with parent window. Please open z-report from Jenkins page.'); return; }
+
       const count = endBuild - startBuild + 1;
-      if (!confirm(\`Are you sure you want to delete \${count} builds from #\${startBuild} to #\${endBuild}?\nAfter deleting this, you have to renew the report manually to refresh.\`)) {
-        return;
-      }
-      
+      if (!confirm(\`Are you sure you want to delete \${count} builds from #\${startBuild} to #\${endBuild}?\\nAfter deleting this, you have to renew the report manually to refresh.\`)) return;
+
       deleteBtn.disabled = true;
       statusEl.textContent = 'Preparing...';
       statusEl.style.color = '#666';
-      
+
       let successCount = 0;
       let failCount = 0;
       let errors = [];
-      
-      // Delete builds one by one
+
       for (let buildNum = startBuild; buildNum <= endBuild; buildNum++) {
         const deleteUrl = \`\${JOB_BASE_URL}/\${buildNum}/doDelete\`;
         statusEl.textContent = \`Deleting #\${buildNum} (\${buildNum - startBuild + 1}/\${count})...\`;
-        
+
         try {
-          // Send delete request to opener via postMessage
           const result = await new Promise((resolve, reject) => {
             const messageId = 'delete_' + Date.now() + '_' + Math.random();
-            
             const messageHandler = (event) => {
               if (event.data && event.data.type === 'deleteResponse' && event.data.messageId === messageId) {
                 window.removeEventListener('message', messageHandler);
                 resolve(event.data);
               }
             };
-            
             window.addEventListener('message', messageHandler);
-            
-            // Send message to opener
-            window.opener.postMessage({
-              type: 'deleteRequest',
-              messageId: messageId,
-              deleteUrl: deleteUrl
-            }, '*');
-            
-            // Timeout after 15 seconds
-            setTimeout(() => {
-              window.removeEventListener('message', messageHandler);
-              reject(new Error('Timeout'));
-            }, 15000);
+            window.opener.postMessage({ type: 'deleteRequest', messageId: messageId, deleteUrl: deleteUrl }, '*');
+            setTimeout(() => { window.removeEventListener('message', messageHandler); reject(new Error('Timeout')); }, 15000);
           });
-          
-          if (result.success) {
-            successCount++;
-          } else {
-            failCount++;
-            const errorMsg = \`#\${buildNum}: \${result.error || result.statusText || 'HTTP ' + result.status || 'Unknown error'}\`;
-            errors.push(errorMsg);
-            console.error('Delete failed:', errorMsg, result);
-          }
+
+          if (result.success) { successCount++; }
+          else { failCount++; errors.push(\`#\${buildNum}: \${result.error || 'Unknown error'}\`); }
         } catch (error) {
           failCount++;
-          const errorMsg = \`#\${buildNum}: \${error.message}\`;
-          errors.push(errorMsg);
-          console.error('Error deleting build:', error);
+          errors.push(\`#\${buildNum}: \${error.message}\`);
         }
-        
-        // Small delay to avoid overwhelming the server
+
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-      
+
       deleteBtn.disabled = false;
       statusEl.textContent = \`Done: \${successCount} deleted, \${failCount} failed\`;
       statusEl.style.color = failCount > 0 ? '#f44336' : '#4CAF50';
-      
-      if (errors.length > 0 && errors.length <= 5) {
-        console.error('Delete errors:', errors);
-      }
-      
-      if (failCount === count) {
-        alert('All deletions failed. Check console for details.');
-      }
+
+      if (failCount === count) alert('All deletions failed. Check console for details.');
     }
-    
+
     function sortTable(columnIndex) {
       const table = document.getElementById('buildsTable');
       const tbody = table.querySelector('tbody');
       const rows = Array.from(tbody.querySelectorAll('tr'));
-      
-      // Toggle sort direction
+
       sortDirections[columnIndex] *= -1;
       const direction = sortDirections[columnIndex];
-      
+
       rows.sort((a, b) => {
         let aValue = a.cells[columnIndex].textContent.trim();
         let bValue = b.cells[columnIndex].textContent.trim();
-        
-        // Special handling for Number column (extract number from #123)
+
         if (columnIndex === 0) {
           aValue = parseInt(aValue.replace('#', '')) || 0;
           bValue = parseInt(bValue.replace('#', '')) || 0;
           return direction * (aValue - bValue);
         }
-        
-        // Special handling for Duration column (convert HH:MM:SS to seconds)
         if (columnIndex === 3) {
           const aSeconds = timeToSeconds(aValue);
           const bSeconds = timeToSeconds(bValue);
           return direction * (aSeconds - bSeconds);
         }
-        
-        // Special handling for Timestamp column
         if (columnIndex === 2) {
           const aDate = new Date(aValue).getTime() || 0;
           const bDate = new Date(bValue).getTime() || 0;
           return direction * (aDate - bDate);
         }
-        
-        // String comparison for other columns
         return direction * aValue.localeCompare(bValue);
       });
-      
-      // Clear and re-append sorted rows
+
       tbody.innerHTML = '';
       rows.forEach(row => tbody.appendChild(row));
-      
-      // Update sort indicators
+
       const headers = table.querySelectorAll('th');
       headers.forEach((th, idx) => {
         const text = th.textContent.replace(' ▼', '').replace(' ▲', '');
@@ -2116,21 +1884,18 @@
         }
       });
     }
-    
+
     function timeToSeconds(timeStr) {
       if (timeStr === '-') return 0;
       const parts = timeStr.split(':');
       if (parts.length !== 3) return 0;
       return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
     }
-    
-    // Add event listeners to table headers
+
     document.addEventListener('DOMContentLoaded', function() {
       const headers = document.querySelectorAll('#buildsTable th');
       headers.forEach((th, index) => {
-        th.addEventListener('click', function() {
-          sortTable(index);
-        });
+        th.addEventListener('click', function() { sortTable(index); });
       });
     });
   </script>
@@ -2139,347 +1904,142 @@
     `;
   }
 
-  // Check if focus is in an input field
+  // ========== Input Detection ==========
+
   function isFocusInInput() {
     const activeElement = document.activeElement;
     const tagName = activeElement.tagName.toLowerCase();
-    
-    // Check if focus is in input, textarea, or contenteditable element
-    if (tagName === 'input' || tagName === 'textarea') {
-      return true;
-    }
-    
-    if (activeElement.isContentEditable) {
-      return true;
-    }
-    
-    // Check if address bar has focus (approximation)
-    // When address bar has focus, document.activeElement is usually body or html
-    if ((tagName === 'body' || tagName === 'html') && 
-        (window.getSelection().toString().length > 0)) {
-      return false; // Text is selected on page, not in address bar
-    }
-    
+
+    if (tagName === 'input' || tagName === 'textarea') return true;
+    if (activeElement.isContentEditable) return true;
+
     return false;
   }
 
-  // Keyboard event handler
+  // ========== Keyboard Event Handler ==========
+
   async function handleKeyPress(event) {
-    // ESC key: Close URL menu
-    if (event.key === 'Escape' && urlMenuVisible) {
-      event.preventDefault();
-      hideUrlMenu();
-      return;
-    }
-    
-    // Don't handle if in input field
-    if (isFocusInInput()) {
+    // ESC key: Close URL menu and deactivate F mode
+    if (event.key === 'Escape') {
+      if (fModeActive) {
+        event.preventDefault();
+        deactivateFMode();
+        return;
+      }
       return;
     }
 
+    // Don't handle if in input field
+    if (isFocusInInput()) return;
+
     const key = event.key.toUpperCase();
+
+    // === Independent keys (work without F mode) ===
 
     // A key: Go back to previous page
     if (key === 'A' && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault();
-      
-      // Check if on a Jenkins site
       const isJenkins = await isJenkinsSite();
-      if (!isJenkins) {
-        console.log('Not on a configured Jenkins site');
-        return;
-      }
-      
-      console.log('Going back to previous page');
+      if (!isJenkins) return;
       window.history.back();
-      return;
-    }
-
-    // S key: Go forward to next page
-    if (key === 'S' && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      const pageType = detectPageType();
-      if (shortcutsActive && hasDirectShortcut(pageType, key)) {
-        // Let the page shortcut handle this key.
-      } else {
-      event.preventDefault();
-      
-      // Check if on a Jenkins site
-      const isJenkins = await isJenkinsSite();
-      if (!isJenkins) {
-        console.log('Not on a configured Jenkins site');
-        return;
-      }
-      
-      console.log('Going forward to next page');
-      window.history.forward();
-      return;
-      }
-    }
-
-    // Z key: Show build statistics report (only on job pages and when shortcuts are active)
-    if (key === 'Z' && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      event.preventDefault();
-      
-      // Check if shortcuts are active
-      if (!shortcutsActive) {
-        console.log('Shortcuts are not active. Press F to activate.');
-        return;
-      }
-      
-      // Check if on a Jenkins site
-      const isJenkins = await isJenkinsSite();
-      if (!isJenkins) {
-        console.log('Not on a configured Jenkins site');
-        return;
-      }
-      
-      // Check current page type
-      const pageType = detectPageType();
-      if (pageType === 'job') {
-        await showStatisticsReport();
-      } else if (pageType === 'node') {
-        await triggerNodeLabels();
-      }
       return;
     }
 
     // Q key: Go to parent URL (one level up)
     if (key === 'Q' && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault();
-      
-      // Check if on a Jenkins site
       const isJenkins = await isJenkinsSite();
-      if (!isJenkins) {
-        console.log('Not on a configured Jenkins site');
-        return;
-      }
-      
+      if (!isJenkins) return;
+
       const currentUrl = window.location.href;
-      let parentUrl = currentUrl;
-      
-      // Remove trailing slash for processing
-      parentUrl = parentUrl.replace(/\/$/, '');
-      
-      // Step 1: Remove /console if present
-      if (parentUrl.endsWith('/console') || parentUrl.endsWith('/consoleFull')) {
-        parentUrl = parentUrl.replace(/\/(console|consoleFull)$/, '');
+
+      if (fModeActive) {
+        const movedToFrequentView = await navigateToMatchedFrequentView(currentUrl);
+        if (movedToFrequentView) return;
       }
-      // Step 2: Remove /timestamps or other console-related paths
+
+      let parentUrl = currentUrl;
+
+      parentUrl = parentUrl.replace(/\/$/, '');
+
+      if (parentUrl.endsWith('/console') || parentUrl.endsWith('/consoleFull') || parentUrl.endsWith('/consoleText')) {
+        parentUrl = parentUrl.replace(/\/(console|consoleFull|consoleText)$/, '');
+      }
       else if (parentUrl.includes('/timestamps')) {
         parentUrl = parentUrl.replace(/\/timestamps.*$/, '');
       }
-      // Step 3: Remove build number (digits at the end)
       else if (parentUrl.match(/\/\d+$/)) {
         parentUrl = parentUrl.replace(/\/\d+$/, '');
       }
-      // Step 4: Remove /job/jobname/ - go to view or parent
       else if (parentUrl.match(/\/job\/[^\/]+$/)) {
         parentUrl = parentUrl.replace(/\/job\/[^\/]+$/, '');
       }
-      // Step 5: Remove /view/viewname/ - go to jenkins instance
       else if (parentUrl.match(/\/view\/[^\/]+$/)) {
         parentUrl = parentUrl.replace(/\/view\/[^\/]+$/, '');
       }
-      // Step 6: Remove jenkins instance path (like /jenkins03)
       else if (parentUrl.match(/\/[^\/]+$/)) {
         const lastPart = parentUrl.match(/\/([^\/]+)$/)[1];
-        // Only remove if it looks like a jenkins instance (contains 'jenkins' or is short)
         if (lastPart.includes('jenkins') || lastPart.length < 15) {
           parentUrl = parentUrl.replace(/\/[^\/]+$/, '');
         }
       }
-      
-      // Ensure we have a valid URL
+
       if (!parentUrl || parentUrl === currentUrl || !parentUrl.includes('://')) {
-        // If we can't go up, go to domain root
         const urlMatch = currentUrl.match(/^(https?:\/\/[^\/]+)/);
         if (urlMatch) {
           parentUrl = urlMatch[1];
         } else {
-          console.log('Cannot determine parent URL');
           return;
         }
       }
-      
-      console.log('Navigating to parent:', parentUrl);
+
       window.location.href = parentUrl;
       return;
     }
 
-    // F key: Toggle shortcuts display and URL menu
-    if (key === 'F' && !event.ctrlKey && !event.altKey && !event.metaKey) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      
-      // Check if on a Jenkins site
-      const isJenkins = await isJenkinsSite();
-      if (!isJenkins) {
-        console.log('Not on a configured Jenkins site');
-        return;
-      }
-
-      ensureNodeBuildExecutorStatusExpanded();
-
-      // Toggle URL menu
-      if (urlMenuVisible) {
-        hideUrlMenu();
-      } else {
-        await showUrlMenu();
-      }
-      
-      // Also toggle shortcuts
-      if (shortcutsActive) {
-        hideShortcuts({ clearSticky: true });
-      } else {
-        showShortcuts();
-      }
-      return;
-    }
-
-    // W key: Toggle first and second breadcrumb dropdowns
+    // W key: Toggle breadcrumb dropdown
     if (key === 'W' && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault();
       event.stopImmediatePropagation();
-
       const isJenkins = await isJenkinsSite();
-      if (!isJenkins) {
-        console.log('Not on a configured Jenkins site');
-        return;
-      }
-
+      if (!isJenkins) return;
       toggleBreadcrumbDropdown();
       return;
     }
 
-    // Navigation shortcuts
-    if (shortcutsActive) {
-      const handled = await navigateByShortcut(key);
-      if (handled) {
-        event.preventDefault();
-      }
-    }
-  }
-
-  // Initialize
-  async function init() {
-    // Check if on a Jenkins site
-    const isJenkins = await isJenkinsSite();
-    if (!isJenkins) {
+    // F key: Toggle F mode (shortcuts display and URL menu)
+    if (key === 'F' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const isJenkins = await isJenkinsSite();
+      if (!isJenkins) return;
+      toggleFMode();
       return;
     }
 
-    // Add navigation buttons
-    addNavigationButtons();
-
-    // Save current URL on page load
-    await saveUrlVisit(window.location.href);
-
-    restoreStickyShortcuts();
-
-    // Add keyboard event listener (capture phase to handle before Jenkins)
-    document.addEventListener('keydown', handleKeyPress, { capture: true });
-    
-    // Listen for delete requests from z-report window
-    window.addEventListener('message', async (event) => {
-      if (event.data && event.data.type === 'deleteRequest') {
-        const { messageId, deleteUrl } = event.data;
-        
-        try {
-          // Get Jenkins Crumb first
-          let crumb = null;
-          try {
-            const url = new URL(deleteUrl);
-            const pathParts = url.pathname.split('/').filter(p => p);
-            let jenkinsPath = '';
-            if (pathParts.length > 0 && pathParts[0].includes('jenkins')) {
-              jenkinsPath = '/' + pathParts[0];
-            }
-            const jenkinsBaseUrl = url.origin + jenkinsPath;
-            const crumbUrl = jenkinsBaseUrl + '/crumbIssuer/api/json';
-            
-            const crumbResponse = await chrome.runtime.sendMessage({
-              type: 'getJenkinsCrumb',
-              url: crumbUrl
-            });
-            
-            if (crumbResponse.ok && crumbResponse.crumb) {
-              crumb = {
-                field: crumbResponse.crumb.crumbRequestField,
-                value: crumbResponse.crumb.crumb
-              };
-            }
-          } catch (crumbError) {
-            console.error('Could not get Jenkins Crumb:', crumbError);
-          }
-          
-          // Perform delete request via background script
-          const response = await chrome.runtime.sendMessage({
-            type: 'deleteBuild',
-            url: deleteUrl,
-            crumbField: crumb ? crumb.field : null,
-            crumbValue: crumb ? crumb.value : null
-          });
-          
-          // Send result back to z-report
-          event.source.postMessage({
-            type: 'deleteResponse',
-            messageId: messageId,
-            success: response.ok,
-            status: response.status,
-            statusText: response.statusText,
-            error: response.error
-          }, '*');
-        } catch (error) {
-          console.error('Error processing delete request:', error);
-          // Send error back to z-report
-          event.source.postMessage({
-            type: 'deleteResponse',
-            messageId: messageId,
-            success: false,
-            error: error.message
-          }, '*');
-        }
+    // === F-mode dependent keys ===
+    if (fModeActive) {
+      // Ctrl+C: ignore in F mode (allow browser copy)
+      if (event.ctrlKey && key === 'C') {
+        return;
       }
-    });
-    
-    // Monitor URL changes (for SPA navigation)
-    let lastUrl = window.location.href;
-    
-    // Use MutationObserver to detect URL changes
-    const observer = new MutationObserver(async () => {
-      const currentUrl = window.location.href;
-      if (currentUrl !== lastUrl) {
-        lastUrl = currentUrl;
-        await saveUrlVisit(currentUrl);
-        window.setTimeout(() => {
-          restoreStickyShortcuts();
-        }, 0);
+
+      const handled = await navigateByShortcut(key);
+      if (handled) {
+        event.preventDefault();
+        // F mode is deactivated inside navigateByShortcut via deactivateFMode()
       }
-    });
-    
-    // Observe changes to the document
-    observer.observe(document, { subtree: true, childList: true });
-    
-    // Also listen to popstate event (back/forward buttons)
-    window.addEventListener('popstate', async () => {
-      console.log('URL changed (popstate):', window.location.href);
-      await saveUrlVisit(window.location.href);
-      window.setTimeout(() => {
-        restoreStickyShortcuts();
-      }, 0);
-    });
+    }
   }
 
-  // Add navigation buttons to the page
+  // ========== Navigation Buttons ==========
+
   function addNavigationButtons() {
-    // Wait for the page to be ready
     const checkAndInsert = () => {
-      // Find the "Back to Dashboard" link or the breadcrumb area
       const backToDashboard = document.querySelector('a[href*="dashboard"]');
       const sidePanel = document.getElementById('side-panel');
       const breadcrumb = document.querySelector('.jenkins-breadcrumbs');
-      
-      // Determine insertion point
+
       let insertionPoint = null;
       if (backToDashboard && backToDashboard.closest('.task')) {
         insertionPoint = backToDashboard.closest('.task');
@@ -2488,7 +2048,7 @@
       } else if (breadcrumb) {
         insertionPoint = breadcrumb.nextSibling;
       }
-      
+
       if (insertionPoint && !document.getElementById('jenkins-nav-buttons')) {
         const buttonContainer = document.createElement('div');
         buttonContainer.id = 'jenkins-nav-buttons';
@@ -2499,42 +2059,50 @@
           gap: 0px;
           justify-content: flex-start;
         `;
-        
+
+        // Q/W/A button
         const navButton = document.createElement('span');
-        navButton.textContent = 'Q/W/A/S';
+        navButton.textContent = 'Q/W/A';
         navButton.className = 'jenkins-shortcut-hint';
-        navButton.title = 'Q: Go to parent | A: Go back | S: Go forward | F: Toggle shortcuts';
+        navButton.title = 'Q: Go to parent | W: Breadcrumb dropdown | A: Go back';
         navButton.style.marginLeft = '0px';
         navButton.style.marginRight = '0px';
-        
-        // Handle click based on position (4 sections)
+
         navButton.onclick = (e) => {
           const rect = navButton.getBoundingClientRect();
           const clickX = e.clientX - rect.left;
           const elementWidth = rect.width;
-          
-          if (clickX < elementWidth / 4) {
-            // First quarter: Q (parent/top)
+
+          if (clickX < elementWidth / 3) {
+            // Q (parent)
             const event = new KeyboardEvent('keydown', { key: 'Q' });
             document.dispatchEvent(event);
-          } else if (clickX < elementWidth / 2) {
-            // Second quarter: A (back)
-            window.history.back();
-          } else if (clickX < (elementWidth * 3) / 4) {
-            // Third quarter: S (forward)
-            window.history.forward();
+          } else if (clickX < (elementWidth * 2) / 3) {
+            // W (breadcrumb)
+            toggleBreadcrumbDropdown();
           } else {
-            // Fourth quarter: F (toggle shortcuts)
-            const event = new KeyboardEvent('keydown', { key: 'F' });
-            document.dispatchEvent(event);
+            // A (back)
+            window.history.back();
           }
         };
-        
+
         buttonContainer.appendChild(navButton);
-        
-        // Add page-specific action button (hidden initially)
-        const pageType = detectPageType();
-        if (pageType === 'job') {
+
+        // F toggle button
+        const toggleButton = document.createElement('span');
+        toggleButton.textContent = 'F';
+        toggleButton.id = 'jenkins-toggle-f-button';
+        toggleButton.className = 'jenkins-shortcut-hint';
+        toggleButton.title = 'F: Toggle shortcuts and URL menu';
+        toggleButton.style.marginLeft = '8px';
+        toggleButton.onclick = () => {
+          toggleFMode();
+        };
+
+        buttonContainer.appendChild(toggleButton);
+
+        // Page-specific action buttons (hidden initially)
+        if (hasJobUrl()) {
           const reportButton = document.createElement('span');
           reportButton.textContent = 'z-report';
           reportButton.className = 'jenkins-shortcut-hint';
@@ -2543,13 +2111,15 @@
           reportButton.style.marginLeft = '8px';
           reportButton.style.cursor = 'pointer';
           reportButton.style.display = 'none';
-          
+
           reportButton.onclick = () => {
             showStatisticsReport();
           };
-          
+
           buttonContainer.appendChild(reportButton);
-        } else if (pageType === 'node') {
+        }
+
+        if (hasNodeUrl()) {
           const labelButton = document.createElement('span');
           labelButton.textContent = 'z-label';
           labelButton.className = 'jenkins-shortcut-hint';
@@ -2565,32 +2135,114 @@
 
           buttonContainer.appendChild(labelButton);
         }
-        
-        // Insert before the insertion point
+
         if (insertionPoint.parentNode) {
-
-        const toggleButton = document.createElement('span');
-        toggleButton.textContent = 'F';
-        toggleButton.className = 'jenkins-shortcut-hint';
-        toggleButton.title = 'F: Toggle shortcuts and URL menu';
-        toggleButton.style.marginLeft = '8px';
-        toggleButton.onclick = () => {
-          const event = new KeyboardEvent('keydown', { key: 'F' });
-          document.dispatchEvent(event);
-        };
-
-        buttonContainer.appendChild(toggleButton);
           insertionPoint.parentNode.insertBefore(buttonContainer, insertionPoint);
         }
       }
     };
-    
-    // Try to insert immediately
+
     checkAndInsert();
-    
-    // Also try after a short delay in case the page is still loading
     setTimeout(checkAndInsert, 500);
     setTimeout(checkAndInsert, 1000);
+  }
+
+  // ========== Initialize ==========
+
+  async function init() {
+    const isJenkins = await isJenkinsSite();
+    if (!isJenkins) return;
+
+    addNavigationButtons();
+    await saveUrlVisit(window.location.href);
+
+    // Add keyboard event listener (capture phase)
+    document.addEventListener('keydown', handleKeyPress, { capture: true });
+
+    // Listen for z-report trigger from popup
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+      if (request.type === 'triggerZReport') {
+        showStatisticsReport();
+        sendResponse({ ok: true });
+        return true;
+      }
+    });
+
+    // Listen for delete requests from z-report window
+    window.addEventListener('message', async (event) => {
+      if (event.data && event.data.type === 'deleteRequest') {
+        const { messageId, deleteUrl } = event.data;
+
+        try {
+          let crumb = null;
+          try {
+            const url = new URL(deleteUrl);
+            const pathParts = url.pathname.split('/').filter(p => p);
+            let jenkinsPath = '';
+            if (pathParts.length > 0 && pathParts[0].includes('jenkins')) {
+              jenkinsPath = '/' + pathParts[0];
+            }
+            const jenkinsBaseUrl = url.origin + jenkinsPath;
+            const crumbUrl = jenkinsBaseUrl + '/crumbIssuer/api/json';
+
+            const crumbResponse = await chrome.runtime.sendMessage({
+              type: 'getJenkinsCrumb',
+              url: crumbUrl
+            });
+
+            if (crumbResponse.ok && crumbResponse.crumb) {
+              crumb = {
+                field: crumbResponse.crumb.crumbRequestField,
+                value: crumbResponse.crumb.crumb
+              };
+            }
+          } catch (crumbError) {
+            console.error('Could not get Jenkins Crumb:', crumbError);
+          }
+
+          const response = await chrome.runtime.sendMessage({
+            type: 'deleteBuild',
+            url: deleteUrl,
+            crumbField: crumb ? crumb.field : null,
+            crumbValue: crumb ? crumb.value : null
+          });
+
+          event.source.postMessage({
+            type: 'deleteResponse',
+            messageId: messageId,
+            success: response.ok,
+            status: response.status,
+            statusText: response.statusText,
+            error: response.error
+          }, '*');
+        } catch (error) {
+          console.error('Error processing delete request:', error);
+          event.source.postMessage({
+            type: 'deleteResponse',
+            messageId: messageId,
+            success: false,
+            error: error.message
+          }, '*');
+        }
+      }
+    });
+
+    // Monitor URL changes (for SPA navigation)
+    let lastUrl = window.location.href;
+
+    const observer = new MutationObserver(async () => {
+      const currentUrl = window.location.href;
+      if (currentUrl !== lastUrl) {
+        lastUrl = currentUrl;
+        await saveUrlVisit(currentUrl);
+      }
+    });
+
+    observer.observe(document, { subtree: true, childList: true });
+
+    window.addEventListener('popstate', async () => {
+      await saveUrlVisit(window.location.href);
+    });
   }
 
   // Run initialization when DOM is ready
