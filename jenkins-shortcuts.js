@@ -10,12 +10,27 @@
   let urlMenuVisible = false;
   let lastSavedUrl = ''; // Track last saved URL to avoid duplicates
   let actionNoticeTimer = null;
+  let scrollOverlayTimer = null;
   let breadcrumbToggleIndex = 0;
+  let gShortcutChainActive = false;
+  let gBottomReachedCount = 0;
+  let bTopReachedCount = 0;
 
   const JOB_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(?:\/job\/[^\/]+)*)\/?\/?/;
   const BUILD_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(?:\/job\/[^\/]+)*\/\d+)\/?/;
   const SYNTHETIC_SHORTCUT_MENU_SELECTOR = '[data-jenkins-synthetic-shortcut]';
   const TIMESTAMPS_PATH = '/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog';
+
+  function normalizeUrlProtocolForCurrentPage(url) {
+    const normalizedUrl = String(url || '').trim();
+    if (!normalizedUrl) return normalizedUrl;
+
+    if (window.location.protocol === 'https:' && /^http:\/\//i.test(normalizedUrl)) {
+      return normalizedUrl.replace(/^http:\/\//i, 'https://');
+    }
+
+    return normalizedUrl;
+  }
 
   function normalizeComparableUrl(url) {
     return String(url || '')
@@ -473,8 +488,9 @@
   }
 
   function getJenkinsUrlParts(url = window.location.href) {
-    const buildMatch = url.match(BUILD_BASE_URL_PATTERN);
-    const jobMatch = url.match(JOB_BASE_URL_PATTERN);
+    const normalizedUrl = normalizeUrlProtocolForCurrentPage(url);
+    const buildMatch = normalizedUrl.match(BUILD_BASE_URL_PATTERN);
+    const jobMatch = normalizedUrl.match(JOB_BASE_URL_PATTERN);
 
     return {
       jobBaseUrl: jobMatch ? jobMatch[1].replace(/\/$/, '') : null,
@@ -491,18 +507,21 @@
   }
 
   async function getLastBuildInfo(url = window.location.href) {
-    const jobBaseUrl = getJobBaseUrl(url);
+    const jobBaseUrl = normalizeUrlProtocolForCurrentPage(getJobBaseUrl(url));
     if (!jobBaseUrl) return null;
 
     try {
-      const response = await fetch(`${jobBaseUrl}/api/json?tree=lastBuild[number,url]`, { credentials: 'include' });
+      const apiUrl = normalizeUrlProtocolForCurrentPage(`${jobBaseUrl}/api/json?tree=lastBuild[number,url]`);
+      const response = await fetch(apiUrl, { credentials: 'include' });
       if (!response.ok) throw new Error(`Failed to load last build info: ${response.status}`);
 
       const data = await response.json();
       const buildNumber = Number(data?.lastBuild?.number);
       if (!buildNumber) return null;
 
-      const buildBaseUrl = String(data?.lastBuild?.url || `${jobBaseUrl}/${buildNumber}`).replace(/\/$/, '');
+      const buildBaseUrl = normalizeUrlProtocolForCurrentPage(
+        String(data?.lastBuild?.url || `${jobBaseUrl}/${buildNumber}`).replace(/\/$/, '')
+      );
       return { jobBaseUrl, buildNumber, buildBaseUrl };
     } catch (error) {
       console.log('Failed to resolve last build info:', error);
@@ -808,6 +827,17 @@
         action: 'retry-chain',
         onClick: async () => navigateToCurrentOrLastBuildRetryOrRebuild()
       },
+      {
+        key: 'G',
+        label: 'Page Down (chain)',
+        title: 'Press F then G once, then keep pressing G to page down',
+        action: 'page-down-chain',
+        onClick: async () => {
+          gShortcutChainActive = true;
+          deactivateFMode();
+          return handleGShortcutScroll();
+        }
+      },
       // Show Configure/History shortcut if on a build page
       ...(hasBuildUrl() ? [{
         key: 'X/H',
@@ -901,6 +931,130 @@
       notice.remove();
       actionNoticeTimer = null;
     }, 2000);
+  }
+
+  function getScrollBounds() {
+    const docElement = document.documentElement;
+    const body = document.body;
+    const maxScrollY = Math.max(
+      (docElement?.scrollHeight || 0) - window.innerHeight,
+      (body?.scrollHeight || 0) - window.innerHeight,
+      0
+    );
+
+    return { maxScrollY };
+  }
+
+  function moveToPageBoundary(target) {
+    const { maxScrollY } = getScrollBounds();
+    const top = target === 'bottom' ? maxScrollY : 0;
+
+    // Jump directly to page boundary, equivalent to a full top/bottom navigation action.
+    window.scrollTo({ top, left: 0, behavior: 'auto' });
+    document.documentElement.scrollTop = top;
+    document.body.scrollTop = top;
+  }
+
+  function showScrollOverlay(direction, isLimitReached) {
+    const existingOverlay = document.getElementById('jenkins-g-scroll-overlay');
+    if (existingOverlay) existingOverlay.remove();
+
+    if (scrollOverlayTimer) {
+      clearTimeout(scrollOverlayTimer);
+      scrollOverlayTimer = null;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'jenkins-g-scroll-overlay';
+    overlay.textContent = direction === 'up' ? '↑' : '↓';
+    overlay.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10002;
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 42px;
+      font-weight: bold;
+      color: #ffffff;
+      background: ${isLimitReached ? 'rgba(220, 53, 69, 0.92)' : 'rgba(40, 167, 69, 0.92)'};
+      border: 2px solid ${isLimitReached ? '#ffb3be' : '#b8f0c8'};
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
+      pointer-events: none;
+      user-select: none;
+    `;
+
+    document.body.appendChild(overlay);
+
+    scrollOverlayTimer = window.setTimeout(() => {
+      overlay.remove();
+      scrollOverlayTimer = null;
+    }, 300);
+  }
+
+  function handleGShortcutScroll() {
+    const { maxScrollY } = getScrollBounds();
+
+    const previousY = window.scrollY;
+    const pageDownAmount = Math.max(Math.floor(window.innerHeight * 0.92), 200);
+    window.scrollBy(0, pageDownAmount);
+
+    const currentY = window.scrollY;
+    const reachedBottom = currentY >= maxScrollY - 2;
+    const moved = currentY > previousY + 1;
+
+    if (!reachedBottom && moved) {
+      gBottomReachedCount = 0;
+      bTopReachedCount = 0;
+      showScrollOverlay('down', false);
+      return true;
+    }
+
+    gBottomReachedCount += 1;
+
+    if (gBottomReachedCount <= 2) {
+      showScrollOverlay('down', true);
+      return true;
+    }
+
+    moveToPageBoundary('top');
+    gBottomReachedCount = 0;
+    bTopReachedCount = 0;
+    return true;
+  }
+
+  function handleBShortcutScroll() {
+    const previousY = window.scrollY;
+    const pageUpAmount = Math.max(Math.floor(window.innerHeight * 0.92), 200);
+    window.scrollBy(0, -pageUpAmount);
+
+    const currentY = window.scrollY;
+    const reachedTop = currentY <= 1;
+    const moved = currentY < previousY - 1;
+
+    if (!reachedTop && moved) {
+      bTopReachedCount = 0;
+      gBottomReachedCount = 0;
+      showScrollOverlay('up', false);
+      return true;
+    }
+
+    bTopReachedCount += 1;
+
+    if (bTopReachedCount <= 2) {
+      showScrollOverlay('up', true);
+      return true;
+    }
+
+    moveToPageBoundary('bottom');
+    bTopReachedCount = 0;
+    gBottomReachedCount = 0;
+    return true;
   }
 
   function navigateWithNotice(url, message) {
@@ -1146,6 +1300,13 @@
         return true;
       }
       return false;
+    }
+
+    // G key: Page Down chain shortcut
+    if (keyUpper === 'G') {
+      gShortcutChainActive = true;
+      deactivateFMode();
+      return handleGShortcutScroll();
     }
 
     // For all other keys, find first matching shortcut
@@ -1934,6 +2095,11 @@
 
     const key = event.key.toUpperCase();
 
+    if (!event.ctrlKey && !event.altKey && !event.metaKey && key !== 'G' && key !== 'T') {
+      gBottomReachedCount = 0;
+      bTopReachedCount = 0;
+    }
+
     // === Independent keys (work without F mode) ===
 
     // A key: Go back to previous page
@@ -2013,7 +2179,41 @@
       event.stopImmediatePropagation();
       const isJenkins = await isJenkinsSite();
       if (!isJenkins) return;
+
+      // Pressing F always exits scroll mode.
+      gShortcutChainActive = false;
+      gBottomReachedCount = 0;
+      bTopReachedCount = 0;
+
       toggleFMode();
+      return;
+    }
+
+    // G key: requires F->G once, then supports repeated G presses
+    if (key === 'G' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      if (!fModeActive && !gShortcutChainActive) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const isJenkins = await isJenkinsSite();
+      if (!isJenkins) return;
+
+      gShortcutChainActive = true;
+      if (fModeActive) deactivateFMode();
+      handleGShortcutScroll();
+      return;
+    }
+
+    // T key: in scroll mode, page-up chain (top reached x2 -> jump to bottom on next T)
+    if (key === 'T' && !event.ctrlKey && !event.altKey && !event.metaKey && gShortcutChainActive) {
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const isJenkins = await isJenkinsSite();
+      if (!isJenkins) return;
+
+      if (fModeActive) deactivateFMode();
+      handleBShortcutScroll();
       return;
     }
 
@@ -2062,7 +2262,7 @@
 
         // Q/W/A button
         const navButton = document.createElement('span');
-        navButton.textContent = 'Q/W/A';
+        navButton.textContent = 'Q/W/A/G';
         navButton.className = 'jenkins-shortcut-hint';
         navButton.title = 'Q: Go to parent | W: Breadcrumb dropdown | A: Go back';
         navButton.style.marginLeft = '0px';
