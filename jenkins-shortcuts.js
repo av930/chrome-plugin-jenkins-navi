@@ -590,7 +590,7 @@
     return lastBuildInfo?.buildBaseUrl || null;
   }
 
-  // Console toggle: console -> consoleText -> consoleFull -> console
+  // Console toggle: console <-> consoleFull
   async function getConsoleToggleUrl(url = window.location.href) {
     const targetBuildBaseUrl = await getTargetBuildBaseUrl(url);
     if (!targetBuildBaseUrl) return null;
@@ -602,14 +602,9 @@
       return `${targetBuildBaseUrl}/console`;
     }
 
-    // consoleText -> consoleFull
-    if (new RegExp(`^${buildUrlPattern}/consoleText/?(?:[?#].*)?$`, 'i').test(url)) {
-      return `${targetBuildBaseUrl}/consoleFull`;
-    }
-
-    // console -> consoleText
+    // console -> consoleFull
     if (new RegExp(`^${buildUrlPattern}/console/?(?:[?#].*)?$`, 'i').test(url)) {
-      return `${targetBuildBaseUrl}/consoleText`;
+      return `${targetBuildBaseUrl}/consoleFull`;
     }
 
     // Default: go to console
@@ -828,7 +823,7 @@
         onClick: async () => navigateToCurrentOrLastBuildRetryOrRebuild()
       },
       {
-        key: 'G',
+        key: 'G/t',
         label: 'Page Down (chain)',
         title: 'Press F then G once, then keep pressing G to page down',
         action: 'page-down-chain',
@@ -964,9 +959,14 @@
       scrollOverlayTimer = null;
     }
 
+    const arrow = direction === 'up' ? '↑'
+      : direction === 'down' ? '↓'
+      : direction === 'left' ? '←'
+      : '→';
+
     const overlay = document.createElement('div');
     overlay.id = 'jenkins-g-scroll-overlay';
-    overlay.textContent = direction === 'up' ? '↑' : '↓';
+    overlay.textContent = arrow;
     overlay.style.cssText = `
       position: fixed;
       top: 50%;
@@ -995,6 +995,10 @@
       overlay.remove();
       scrollOverlayTimer = null;
     }, 300);
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   function handleGShortcutScroll() {
@@ -1282,6 +1286,9 @@
 
     // P/N key: Previous/Next build
     if (keyUpper === 'P' || keyUpper === 'N') {
+      deactivateFMode();
+      showScrollOverlay(keyUpper === 'P' ? 'left' : 'right', false);
+      await delay(120);
       return navigateToPreviousOrNextBuild(keyUpper);
     }
 
@@ -2118,35 +2125,45 @@
       if (!isJenkins) return;
 
       const currentUrl = window.location.href;
+      const currentPath = currentUrl.split('?')[0].replace(/\/$/, '');
+      const jobBaseUrl = getJobBaseUrl(currentUrl);
+      const jobPath = jobBaseUrl ? jobBaseUrl.split('?')[0].replace(/\/$/, '') : null;
 
-      if (fModeActive) {
+      if (fModeActive && jobPath && currentPath === jobPath) {
         const movedToFrequentView = await navigateToMatchedFrequentView(currentUrl);
         if (movedToFrequentView) return;
       }
 
       let parentUrl = currentUrl;
 
-      parentUrl = parentUrl.replace(/\/$/, '');
+      if (jobPath && currentPath !== jobPath) {
+        parentUrl = jobBaseUrl;
+      } else {
+        parentUrl = parentUrl.split('?')[0].replace(/\/$/, '');
 
-      if (parentUrl.endsWith('/console') || parentUrl.endsWith('/consoleFull') || parentUrl.endsWith('/consoleText')) {
-        parentUrl = parentUrl.replace(/\/(console|consoleFull|consoleText)$/, '');
-      }
-      else if (parentUrl.includes('/timestamps')) {
-        parentUrl = parentUrl.replace(/\/timestamps.*$/, '');
-      }
-      else if (parentUrl.match(/\/\d+$/)) {
-        parentUrl = parentUrl.replace(/\/\d+$/, '');
-      }
-      else if (parentUrl.match(/\/job\/[^\/]+$/)) {
-        parentUrl = parentUrl.replace(/\/job\/[^\/]+$/, '');
-      }
-      else if (parentUrl.match(/\/view\/[^\/]+$/)) {
-        parentUrl = parentUrl.replace(/\/view\/[^\/]+$/, '');
-      }
-      else if (parentUrl.match(/\/[^\/]+$/)) {
-        const lastPart = parentUrl.match(/\/([^\/]+)$/)[1];
-        if (lastPart.includes('jenkins') || lastPart.length < 15) {
-          parentUrl = parentUrl.replace(/\/[^\/]+$/, '');
+        // 1. Strip console/timestamps if present
+        if (parentUrl.endsWith('/console') || parentUrl.endsWith('/consoleFull') || parentUrl.endsWith('/consoleText')) {
+          parentUrl = parentUrl.replace(/\/(console|consoleFull|consoleText)$/, '');
+        }
+        else if (parentUrl.includes('/timestamps')) {
+          parentUrl = parentUrl.replace(/\/timestamps.*$/, '');
+        }
+
+        // 2. Strip the next level of URL
+        if (parentUrl.match(/\/\d+$/)) {
+          parentUrl = parentUrl.replace(/\/\d+$/, '');
+        }
+        else if (parentUrl.match(/\/job\/[^\/]+$/)) {
+          parentUrl = parentUrl.replace(/\/job\/[^\/]+$/, '');
+        }
+        else if (parentUrl.match(/\/view\/[^\/]+$/)) {
+          parentUrl = parentUrl.replace(/\/view\/[^\/]+$/, '');
+        }
+        else if (parentUrl.match(/\/[^\/]+$/)) {
+          const lastPart = parentUrl.match(/\/([^\/]+)$/)[1];
+          if (lastPart.includes('jenkins') || lastPart.length < 15) {
+            parentUrl = parentUrl.replace(/\/[^\/]+$/, '');
+          }
         }
       }
 
@@ -2201,6 +2218,20 @@
       gShortcutChainActive = true;
       if (fModeActive) deactivateFMode();
       handleGShortcutScroll();
+      return;
+    }
+
+    // P/N keys: in scroll mode, previous/next build without F prefix
+    if (gShortcutChainActive && !event.ctrlKey && !event.altKey && !event.metaKey && (key === 'P' || key === 'N')) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const isJenkins = await isJenkinsSite();
+      if (!isJenkins) return;
+
+      if (fModeActive) deactivateFMode();
+      showScrollOverlay(key === 'P' ? 'left' : 'right', false);
+      await delay(120);
+      await navigateToPreviousOrNextBuild(key);
       return;
     }
 
@@ -2262,7 +2293,7 @@
 
         // Q/W/A button
         const navButton = document.createElement('span');
-        navButton.textContent = 'Q/W/A/G';
+        navButton.textContent = 'Q/W/A';
         navButton.className = 'jenkins-shortcut-hint';
         navButton.title = 'Q: Go to parent | W: Breadcrumb dropdown | A: Go back';
         navButton.style.marginLeft = '0px';
