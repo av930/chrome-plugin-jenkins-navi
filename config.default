@@ -1,11 +1,9 @@
 {
   "sites": {
-    "V1": "http://vjenkins.rge.com/jenkins01",
-    "V2": "http://vjenkins.rge.com/jenkins02",
-    "V3": "http://vjenkins.rge.com/jenkins03",
-    "V6": "http://vjenkins.rge.com/jenkins06",
-    "L1": "http://lamp-ci.rge.com",
-    "E1": "http://10.218.144.200:8300",
+    "V1": "http://jenkins.rge.com/jenkins01",
+    "V2": "http://jenkins.rge.com/jenkins02",
+    "V3": "http://jenkins.rge.com/jenkins03",
+    "V6": "http://jenkins.rge.com/jenkins06",
     "RM": "http://ci.vbee.rge.com/vsrms/"
   },
   "menus": {
@@ -24,9 +22,8 @@
     "configure": "configure"
   },
   "custom": {
-   "honda26my": ["http://vjenkins.rge.com/jenkins06/view/", "http://vjenkins.rge.com/jenkins06/job/honda_26mypf3__ci_buildchecker/"],
-   "connect_w": ["http://vjenkins.rge.com/jenkins03/view/Connect_Wide/", "http://vjenkins.rge.com/jenkins03/job/connectW_ci_ccc_Atriggerbuild/"],
-   "my_job": "http://vjenkins.rge.com/jenkins03/view/%7EPrivate/",
+   "honda26my": ["http://jenkins.rge.com/jenkins06/view/", "http://jenkins.rge.com/jenkins06/job/honda_buildchecker/"],
+   "connect_w": ["http://jenkins.rge.com/jenkins03/view/", "http://jenkins.rge.com/jenkins03/job/ccc_Atriggerbuild/"],
     "vgit_na": "https://vgit.rge.com/na",
     "vgit_eu": "https://vgit.rge.com/eu",
     "vgit_as": "https://vgit.rge.com/as",
@@ -35,8 +32,8 @@
     "custom": "http://your.custom.com"
   },
   "run": {
-    "rm-history": "http://vjenkins.rge.com/jenkins03/job/_SFolder_CommonUtility/job/ControlJenkins/buildWithParameters?token=plugin",
-    "retrigger": "http://vjenkins.rge.com/jenkins03/job/Common_retriggerJOB/buildWithParameters?token=plugin",
+    "rm-history": "http://jenkins.rge.com/jenkins03/job/_SFolder_CommonUtility/job/ControlJenkins/buildWithParameters?token=plugin",
+    "retrigger": "http://jenkins.rge.com/jenkins03/job/Common_retriggerJOB/buildWithParameters?token=plugin",
     "temp_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin"
   }
 }

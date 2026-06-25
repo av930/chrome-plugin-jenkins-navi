@@ -1284,6 +1284,19 @@
       return navigateToTimestampsToggle();
     }
 
+    // E key: Clone current tab
+    if (keyUpper === 'E') {
+      deactivateFMode();
+      chrome.runtime.sendMessage({ type: 'cloneTab' }, (response) => {
+        if (response?.ok) {
+          console.log('Tab cloned successfully');
+        } else {
+          console.error('Failed to clone tab:', response?.error);
+        }
+      });
+      return true;
+    }
+
     // P/N key: Previous/Next build
     if (keyUpper === 'P' || keyUpper === 'N') {
       deactivateFMode();
