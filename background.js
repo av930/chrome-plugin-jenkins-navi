@@ -157,8 +157,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   if (request.type === 'cloneTab') {
     const currentUrl = sender.tab.url;
+    const currentIndex = sender.tab.index;
     
-    chrome.tabs.create({ url: currentUrl, active: false })
+    // Insert to the left (same index) or right (index + 1) of current tab
+    const insertIndex = request.insertLeft ? currentIndex : currentIndex + 1;
+    
+    chrome.tabs.create({ url: currentUrl, active: false, index: insertIndex })
       .then(() => {
         sendResponse({ ok: true });
       })
