@@ -1645,6 +1645,18 @@
       const width1 = tempSpan.offsetWidth;
       document.body.removeChild(tempSpan);
       if (width1 <= maxWidth) return shortened1;
+      
+      // If still too long, extract just the job name from /job/...
+      const jobnameMatch = viewJobMatch[3].match(/\/job\/([^\/]+)/);
+      if (jobnameMatch) {
+        const shortened3 = '~~~/' + jobnameMatch[1];
+        tempSpan.textContent = shortened3;
+        document.body.appendChild(tempSpan);
+        const width3 = tempSpan.offsetWidth;
+        document.body.removeChild(tempSpan);
+        if (width3 <= maxWidth) return shortened3;
+      }
+      return shortened1;
     }
 
     const jobMatch = url.match(/^(https?:\/\/)(.+?)(\/job\/.*)$/);
@@ -1658,7 +1670,14 @@
       if (width2 <= maxWidth) return shortened2;
 
       const jobnameMatch = jobMatch[3].match(/\/job\/([^\/]+)/);
-      if (jobnameMatch) return '~~~/' + jobnameMatch[1];
+      if (jobnameMatch) {
+        const shortened4 = '~~~/' + jobnameMatch[1];
+        tempSpan.textContent = shortened4;
+        document.body.appendChild(tempSpan);
+        const width4 = tempSpan.offsetWidth;
+        document.body.removeChild(tempSpan);
+        if (width4 <= maxWidth) return shortened4;
+      }
       return shortened2;
     }
 
@@ -2342,6 +2361,244 @@
     `;
   }
 
+  // ========== Help Modal ==========
+  // Help modal data is defined in help.js
+
+  function showHelpModal() {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('jenkins-help-modal');
+    if (existingModal) {
+      existingModal.remove();
+      return; // Toggle off
+    }
+
+    const modal = document.createElement('div');
+    modal.id = 'jenkins-help-modal';
+    modal.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(255, 255, 255, 0.97);
+      color: #333;
+      padding: 30px;
+      border-radius: 12px;
+      z-index: 100000;
+      width: 1000px;
+      height: 600px;
+      overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      font-family: Arial, sans-serif;
+      user-select: none;
+      border: 1px solid #ddd;
+    `;
+
+    // Generate HTML from JSON data
+    let helpContent = `
+      <div style="text-align: center; margin-bottom: 20px;">
+        <h2 style="margin: 0 0 10px 0; color: #2E7D32;">${HELP_MODAL_DATA.title}</h2>
+        <p style="margin: 0; color: #666; font-size: 14px;">${HELP_MODAL_DATA.subtitle}</p>
+      </div>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1.8fr 1fr; gap: 25px;">
+    `;
+
+    // Generate columns
+    HELP_MODAL_DATA.columns.forEach(column => {
+      helpContent += '<div>';
+      
+      // Generate sections in this column
+      column.sections.forEach(section => {
+        helpContent += `
+          <div style="margin-bottom: 18px;">
+            <h3 style="color: #2E7D32; border-bottom: 2px solid #4CAF50; padding-bottom: 5px; margin-bottom: 10px; font-size: 15px;">${section.title}</h3>
+            <table style="width: 100%; border-collapse: collapse;">
+        `;
+        
+        // Generate shortcuts in this section
+        section.shortcuts.forEach(shortcut => {
+          helpContent += `
+              <tr>
+                <td style="padding: 5px 0;">
+                  <kbd style="background: #e8f5e9; color: #2E7D32; padding: 2px 7px; border-radius: 3px; font-family: monospace; border: 1px solid #4CAF50; font-weight: bold;">${shortcut.key}</kbd>
+                </td>
+                <td style="padding: 5px 8px; font-size: 13px; white-space: pre-line;">${shortcut.description}</td>
+              </tr>
+          `;
+        });
+        
+        helpContent += `
+            </table>
+          </div>
+        `;
+      });
+      
+      helpContent += '</div>';
+    });
+
+    helpContent += `
+      </div>
+
+      <div style="text-align: center; margin-top: 20px; padding-top: 15px; border-top: 1px solid #ccc;">
+        <p style="margin: 0; color: #666; font-size: 13px;">${HELP_MODAL_DATA.footer}</p>
+      </div>
+    `;
+
+    modal.innerHTML = helpContent;
+    document.body.appendChild(modal);
+
+    // Close on ESC or clicking outside
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+
+    modal.addEventListener('mousedown', (e) => {
+      isDragging = false;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+    });
+
+    modal.addEventListener('mousemove', (e) => {
+      if (Math.abs(e.clientX - dragStartX) > 5 || Math.abs(e.clientY - dragStartY) > 5) {
+        isDragging = true;
+      }
+    });
+
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal && !isDragging) {
+        modal.remove();
+        document.removeEventListener('keydown', closeModal);
+      }
+    });
+
+    const closeModal = (e) => {
+      if (e.key === 'Escape' || e.key === '?') {
+        modal.remove();
+        document.removeEventListener('keydown', closeModal);
+      }
+    };
+    
+    document.addEventListener('keydown', closeModal);
+  }
+
+  // ========== Download Config XML ==========
+
+  async function downloadConfigXml() {
+    try {
+      const jobBaseUrl = getJobBaseUrl();
+
+      if (!jobBaseUrl) {
+        alert('현재 URL이 Job이나 Build URL이 아닙니다. Job 또는 Build 페이지에서 실행해주세요.');
+        return;
+      }
+
+      const configUrl = jobBaseUrl + '/config.xml';
+      
+      const response = await fetch(configUrl);
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch config.xml: ${response.status} ${response.statusText}`);
+      }
+
+      const xmlText = await response.text();
+      
+      // Decode HTML entities in the XML text
+      const decodedXml = decodeHtmlEntitiesInXml(xmlText);
+      
+      // Format XML with indentation
+      const formattedXml = formatXml(decodedXml);
+
+      // Extract job name from URL for filename
+      const jobName = extractJobNameFromUrl(jobBaseUrl) || 'config';
+      const filename = `${jobName}_config.xml`;
+
+      // Create download blob
+      const blob = new Blob([formattedXml], { type: 'application/xml' });
+      const downloadUrl = URL.createObjectURL(blob);
+
+      // Create temporary link and trigger download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Clean up
+      URL.revokeObjectURL(downloadUrl);
+
+      console.log(`Successfully downloaded config.xml as ${filename}`);
+
+    } catch (error) {
+      console.error('Failed to download config.xml:', error);
+      alert(`Config.xml 다운로드 실패: ${error.message}`);
+    }
+  }
+
+  // Decode HTML entities in XML text while preserving XML structure
+  function decodeHtmlEntitiesInXml(xmlText) {
+    // Simple approach: decode entities using string replacement
+    // This preserves ALL XML structure including tags, attributes, etc.
+    const entities = {
+      '&amp;': '&',
+      '&lt;': '<',
+      '&gt;': '>',
+      '&quot;': '"',
+      '&apos;': "'",
+      '&#39;': "'",
+      '&#x27;': "'",
+      '&#x2F;': '/'
+    };
+    
+    let result = xmlText;
+    
+    // Replace HTML entities
+    for (const [entity, char] of Object.entries(entities)) {
+      result = result.split(entity).join(char);
+    }
+    
+    // Decode numeric entities (&#123; and &#xAB;)
+    result = result.replace(/&#(\d+);/g, (match, dec) => {
+      return String.fromCharCode(parseInt(dec, 10));
+    });
+    
+    result = result.replace(/&#x([0-9A-Fa-f]+);/g, (match, hex) => {
+      return String.fromCharCode(parseInt(hex, 16));
+    });
+    
+    return result;
+  }
+
+  // Format XML with proper indentation
+  function formatXml(xml) {
+    const PADDING = '  '; // 2 spaces for indentation
+    const reg = /(>)(<)(\/*)/g;
+    let formatted = '';
+    let pad = 0;
+
+    xml = xml.replace(reg, '$1\r\n$2$3');
+
+    xml.split('\r\n').forEach((node) => {
+      let indent = 0;
+      if (node.match(/.+<\/\w[^>]*>$/)) {
+        indent = 0;
+      } else if (node.match(/^<\/\w/)) {
+        if (pad !== 0) {
+          pad -= 1;
+        }
+      } else if (node.match(/^<\w([^>]*[^\/])?>.*$/)) {
+        indent = 1;
+      } else {
+        indent = 0;
+      }
+
+      formatted += PADDING.repeat(pad) + node + '\r\n';
+      pad += indent;
+    });
+
+    return formatted;
+  }
+
   // ========== Input Detection ==========
 
   function isFocusInInput() {
@@ -2525,6 +2782,14 @@
         return;
       }
 
+      // ? key: Show help modal
+      if (key === '?' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        showHelpModal();
+        return;
+      }
+
       const handled = await navigateByShortcut(key);
       if (handled) {
         event.preventDefault();
@@ -2660,10 +2925,16 @@
     // Add keyboard event listener (capture phase)
     document.addEventListener('keydown', handleKeyPress, { capture: true });
 
-    // Listen for z-report trigger from popup
+    // Listen for z-report and downConfig trigger from popup
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.type === 'triggerZReport') {
         showStatisticsReport();
+        sendResponse({ ok: true });
+        return true;
+      }
+      
+      if (request.type === 'triggerDownConfig') {
+        downloadConfigXml();
         sendResponse({ ok: true });
         return true;
       }
