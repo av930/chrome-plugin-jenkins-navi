@@ -1,4 +1,5 @@
 {
+  "comment":"이 파일은 plugin 최초 설치시 option에 default로 들어가는 설정입니다.",
   "sites": {
     "V1": "http://jenkins.rge.com/jenkins01",
     "V2": "http://jenkins.rge.com/jenkins02",
