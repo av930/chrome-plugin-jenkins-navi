@@ -28,7 +28,7 @@
   "content_scripts": [
     {
       "matches": ["http://*/*", "https://*/*"],
-      "js": ["jenkins-shortcuts.js"],
+      "js": ["help.js", "jenkins-shortcuts.js"],
       "css": ["jenkins-shortcuts.css"],
       "run_at": "document_idle"
     }

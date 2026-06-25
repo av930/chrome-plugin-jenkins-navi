@@ -133,6 +133,17 @@ async function handleInternalFunction(funcName) {
         });
       }
     });
+  } else if (funcName === 'downConfig' || funcName === 'downloadConfig') {
+    // Send message to content script to download config.xml
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs && tabs.length > 0) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'triggerDownConfig' }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Failed to trigger downConfig:', chrome.runtime.lastError.message);
+          }
+        });
+      }
+    });
   } else {
     console.warn('Unknown internal function:', funcName);
   }
