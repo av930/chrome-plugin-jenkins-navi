@@ -1,4 +1,5 @@
 // Default config.list content
+// 코드상에서 기존 config가 없을때 default값으로 동작
 const DEFAULT_CONFIG = {
   // add your jenkins url
   "sites": { 
