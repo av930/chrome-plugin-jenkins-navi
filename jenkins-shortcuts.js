@@ -18,6 +18,7 @@
 
   const JOB_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(?:\/job\/[^\/]+)*)\/?\/?/;
   const BUILD_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(?:\/job\/[^\/]+)*\/\d+)\/?/;
+  const NODE_BASE_URL_PATTERN = /^(.*?\/computer\/[^\/]+)\/?/;
   const SYNTHETIC_SHORTCUT_MENU_SELECTOR = '[data-jenkins-synthetic-shortcut]';
   const TIMESTAMPS_PATH = '/timestamps/?time=HH:mm:ss&timeZone=GMT+9&appendLog';
 
@@ -491,10 +492,12 @@
     const normalizedUrl = normalizeUrlProtocolForCurrentPage(url);
     const buildMatch = normalizedUrl.match(BUILD_BASE_URL_PATTERN);
     const jobMatch = normalizedUrl.match(JOB_BASE_URL_PATTERN);
+    const nodeMatch = normalizedUrl.match(NODE_BASE_URL_PATTERN);
 
     return {
       jobBaseUrl: jobMatch ? jobMatch[1].replace(/\/$/, '') : null,
-      buildBaseUrl: buildMatch ? buildMatch[1].replace(/\/$/, '') : null
+      buildBaseUrl: buildMatch ? buildMatch[1].replace(/\/$/, '') : null,
+      nodeBaseUrl: nodeMatch ? nodeMatch[1].replace(/\/$/, '') : null
     };
   }
 
@@ -504,6 +507,10 @@
 
   function getBuildBaseUrl(url = window.location.href) {
     return getJenkinsUrlParts(url).buildBaseUrl;
+  }
+
+  function getNodeBaseUrl(url = window.location.href) {
+    return getJenkinsUrlParts(url).nodeBaseUrl;
   }
 
   async function getLastBuildInfo(url = window.location.href) {
@@ -573,6 +580,15 @@
     return true;
   }
 
+  function navigateToNodeConfigure() {
+    const nodeBaseUrl = getNodeBaseUrl();
+    if (!nodeBaseUrl) return false;
+
+    deactivateFMode();
+    window.location.href = `${nodeBaseUrl}/configure`;
+    return true;
+  }
+
   function navigateToJobHistory() {
     const jobBaseUrl = getJobBaseUrl();
     if (!jobBaseUrl) return false;
@@ -612,6 +628,13 @@
   }
 
   async function navigateToConsoleToggle() {
+    const nodeBaseUrl = getNodeBaseUrl();
+    if (nodeBaseUrl) {
+      deactivateFMode();
+      window.location.href = `${nodeBaseUrl}/log`;
+      return true;
+    }
+
     const targetUrl = await getConsoleToggleUrl();
     if (!targetUrl) return false;
 
@@ -642,6 +665,13 @@
   }
 
   async function navigateToTimestampsToggle() {
+    const nodeBaseUrl = getNodeBaseUrl();
+    if (nodeBaseUrl) {
+      deactivateFMode();
+      window.location.href = `${nodeBaseUrl}/log`;
+      return true;
+    }
+
     const targetUrl = await getTimestampsToggleUrl();
     if (!targetUrl) return false;
 
@@ -804,8 +834,10 @@
     if (!container) return [];
 
     const foundLinks = [];
+    // Don't add Configure link on build pages (X key should navigate to job configure instead)
+    const isBuildPage = hasBuildUrl();
     const configureLink = findExistingMenuLink('configure');
-    if (configureLink) {
+    if (configureLink && !isBuildPage) {
       foundLinks.push({ key: 'X', link: configureLink, text: ['Configure'] });
     }
 
@@ -1262,7 +1294,15 @@
 
     // X key: Configure (always job configure)
     if (keyUpper === 'X') {
+      // On build pages, skip finding build's configure link and go directly to job configure
+      if (hasBuildUrl() && hasJobUrl()) {
+        return navigateToJobConfigure();
+      }
+      
+      const match = findFirstMatchingShortcut('X');
+      if (match?.link) return activateLink(match.link);
       if (hasJobUrl()) return navigateToJobConfigure();
+      if (hasNodeUrl()) return navigateToNodeConfigure();
       return false;
     }
 
@@ -1350,9 +1390,15 @@
     const syntheticMenuLinks = ensureSyntheticShortcutMenuItems();
     const foundLinks = [];
     const usedKeys = new Set();
+    const isBuildPage = hasBuildUrl();
 
     SHORTCUTS.forEach(shortcut => {
       const keyUpper = shortcut.key.toUpperCase();
+
+      // On build pages, suppress X/E hint badges for menu rows like
+      // "Edit Build Information" and "Environment Variables".
+      if (isBuildPage && (keyUpper === 'X' || keyUpper === 'E')) return;
+
       // Skip if we already found a link for this key
       if (usedKeys.has(keyUpper)) return;
 
@@ -1380,6 +1426,13 @@
     });
 
     syntheticMenuLinks.forEach((item) => {
+      // Filter out X/E shortcuts on build pages, except for 'X/H' Configure/History synthetic menu
+      const itemKey = item.key.toUpperCase();
+      if (isBuildPage && itemKey !== 'X/H') {
+        const itemKeyPrefix = itemKey.split('/')[0];
+        if (itemKeyPrefix === 'X' || itemKeyPrefix === 'E') return;
+      }
+      
       if (!foundLinks.some(existingItem => existingItem.key === item.key)) {
         foundLinks.push(item);
       }
