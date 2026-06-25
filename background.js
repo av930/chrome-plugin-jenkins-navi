@@ -154,4 +154,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
     return true;
   }
+
+  if (request.type === 'cloneTab') {
+    const currentUrl = sender.tab.url;
+    
+    chrome.tabs.create({ url: currentUrl, active: false })
+      .then(() => {
+        sendResponse({ ok: true });
+      })
+      .catch(err => {
+        console.error('Failed to clone tab:', err);
+        sendResponse({ ok: false, error: err.toString() });
+      });
+    return true;
+  }
 });
