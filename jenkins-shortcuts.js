@@ -52,23 +52,38 @@
   }
 
   function getCanonicalViewJobUrl(url) {
-    const match = String(url || '').match(/^(https?:\/\/[^?#]+?\/view\/[^\/?#]+\/job\/[^\/?#]+)\/?(?:[?#].*)?$/i)
-      || String(url || '').match(/^(https?:\/\/[^?#]+?\/view\/[^\/?#]+\/job\/[^\/?#]+)\//i);
-    return match ? `${match[1].replace(/\/+$/, '')}/` : null;
+    // Support multi-level jobs: /view/xxx/job/folder/job/name
+    // Also handle build URLs like /30 or /30/console, /30/artifact, etc.
+    const match = String(url || '').match(/^(https?:\/\/[^?#]+?\/view\/[^\/?#]+\/job\/.+?)(?:\/\d+(?:\/[^\/]*)?)?[\/]?(?:[?#].*)?$/i);
+    if (match) {
+      const jobPath = match[1].replace(/\/+$/, '');
+      // Ensure it ends with a job segment, not a build number or other path
+      if (/\/job\/[^\/?#]+$/.test(jobPath)) {
+        return `${jobPath}/`;
+      }
+    }
+    return null;
   }
 
   function getCanonicalBareJobUrl(url) {
-    const match = String(url || '').match(/^(https?:\/\/[^?#]+?\/job\/[^\/?#]+)\/?(?:[?#].*)?$/i)
-      || String(url || '').match(/^(https?:\/\/[^?#]+?\/job\/[^\/?#]+)\//i);
-    return match ? `${match[1].replace(/\/+$/, '')}/` : null;
+    // Support multi-level jobs: /job/folder/job/name
+    const jobBaseUrl = getJobBaseUrl(url);
+    if (!jobBaseUrl) return null;
+    
+    // Check if this is NOT a view job URL (no /view/ prefix)
+    if (/\/view\/[^\/]+\/job\//i.test(url)) return null;
+    
+    return `${jobBaseUrl.replace(/\/+$/, '')}/`;
   }
 
   function getSitePrefixFromViewJobUrl(url) {
-    return String(url || '').replace(/\/view\/[^\/]+\/job\/[^\/]+\/?$/i, '').replace(/\/+$/, '');
+    // Support multi-level jobs: remove /view/xxx/job/... pattern
+    return String(url || '').replace(/\/view\/[^\/]+\/job\/.+$/i, '').replace(/\/+$/, '');
   }
 
   function getSitePrefixFromBareJobUrl(url) {
-    return String(url || '').replace(/\/job\/[^\/]+\/?$/i, '').replace(/\/+$/, '');
+    // Support multi-level jobs: remove /job/... pattern
+    return String(url || '').replace(/\/job\/.+$/i, '').replace(/\/+$/, '');
   }
 
   function getSitePrefixFromAnyJobUrl(url) {
@@ -188,15 +203,69 @@
           return;
         }
 
-        normalizedUrl = findMappedViewJobUrlForBareJob(bareJobUrl, urlHistory);
-        if (!normalizedUrl) {
-          await chrome.storage.local.set({ urlHistory });
-          return;
-        }
+        // Try to find mapped view job URL, but if not found, save bare job URL
+        normalizedUrl = findMappedViewJobUrlForBareJob(bareJobUrl, urlHistory) || bareJobUrl;
       }
 
       if (normalizedUrl === lastSavedUrl) return;
       lastSavedUrl = normalizedUrl;
+
+      // If this is a view job URL, check if there's a matching bare job URL in history
+      // If found, migrate the bare job data to the view job URL
+      const isViewJobUrl = /\/view\/[^\/]+\/job\/[^\/]+\/?$/i.test(normalizedUrl);
+      if (isViewJobUrl) {
+        const viewJobName = extractJobNameFromUrl(normalizedUrl);
+        const viewSitePrefix = normalizeComparableUrl(getSitePrefixFromViewJobUrl(normalizedUrl));
+        
+        if (viewJobName && viewSitePrefix) {
+          // Find matching bare job URLs
+          const bareJobUrlsToMigrate = [];
+          
+          for (const [savedUrl, data] of Object.entries(urlHistory)) {
+            // Skip if it's already a view job URL
+            if (/\/view\/[^\/]+\/job\/[^\/]+\/?$/i.test(savedUrl)) continue;
+            
+            // Check if it's a bare job URL
+            if (!/\/job\/[^\/]+\/?$/i.test(savedUrl)) continue;
+            
+            const bareJobName = extractJobNameFromUrl(savedUrl);
+            const bareSitePrefix = normalizeComparableUrl(getSitePrefixFromBareJobUrl(savedUrl));
+            
+            // Check if job name and site prefix match
+            if (bareJobName === viewJobName && bareSitePrefix === viewSitePrefix) {
+              bareJobUrlsToMigrate.push({ url: savedUrl, data });
+            }
+          }
+          
+          // Migrate bare job data to view job URL
+          if (bareJobUrlsToMigrate.length > 0) {
+            console.log('Migrating bare job URLs to view job URL:', normalizedUrl);
+            
+            for (const { url: bareUrl, data: bareData } of bareJobUrlsToMigrate) {
+              console.log('  Migrating:', bareUrl);
+              
+              if (urlHistory[normalizedUrl]) {
+                // Merge data if view job URL already exists
+                urlHistory[normalizedUrl].count += bareData.count;
+                urlHistory[normalizedUrl].firstVisit = Math.min(
+                  urlHistory[normalizedUrl].firstVisit,
+                  bareData.firstVisit
+                );
+                urlHistory[normalizedUrl].lastVisit = Math.max(
+                  urlHistory[normalizedUrl].lastVisit,
+                  bareData.lastVisit
+                );
+              } else {
+                // Copy bare job data to view job URL
+                urlHistory[normalizedUrl] = { ...bareData };
+              }
+              
+              // Remove bare job URL
+              delete urlHistory[bareUrl];
+            }
+          }
+        }
+      }
 
       const entries = Object.entries(urlHistory);
       entries.sort((a, b) => b[1].lastVisit - a[1].lastVisit);
@@ -515,10 +584,13 @@
 
   async function getLastBuildInfo(url = window.location.href) {
     const jobBaseUrl = normalizeUrlProtocolForCurrentPage(getJobBaseUrl(url));
+    console.log('getLastBuildInfo - input URL:', url);
+    console.log('getLastBuildInfo - extracted jobBaseUrl:', jobBaseUrl);
     if (!jobBaseUrl) return null;
 
     try {
       const apiUrl = normalizeUrlProtocolForCurrentPage(`${jobBaseUrl}/api/json?tree=lastBuild[number,url]`);
+      console.log('getLastBuildInfo - fetching:', apiUrl);
       const response = await fetch(apiUrl, { credentials: 'include' });
       if (!response.ok) throw new Error(`Failed to load last build info: ${response.status}`);
 
@@ -529,7 +601,36 @@
       const buildBaseUrl = normalizeUrlProtocolForCurrentPage(
         String(data?.lastBuild?.url || `${jobBaseUrl}/${buildNumber}`).replace(/\/$/, '')
       );
-      return { jobBaseUrl, buildNumber, buildBaseUrl };
+      
+      // Fetch builtOn info from the build's detailed API (same as getBuildNodeUrl)
+      let builtOn = null;
+      let nodeUrl = null;
+      const siteUrl = getJenkinsSiteUrl(buildBaseUrl) || jobBaseUrl;
+      console.log('getLastBuildInfo - siteUrl:', siteUrl);
+      
+      try {
+        const buildApiUrl = normalizeUrlProtocolForCurrentPage(`${buildBaseUrl}/api/json?tree=builtOn,builtOnStr`);
+        console.log('getLastBuildInfo - fetching build details:', buildApiUrl);
+        const buildResponse = await fetch(buildApiUrl, { credentials: 'include' });
+        if (buildResponse.ok) {
+          const buildData = await buildResponse.json();
+          builtOn = buildData?.builtOn || buildData?.builtOnStr || null;
+          console.log('Build node info - builtOn:', builtOn);
+          if (builtOn) {
+            console.log('Site URL:', siteUrl);
+            nodeUrl = getNodeUrlFromName(builtOn, siteUrl);
+            console.log('Node URL:', nodeUrl);
+          } else {
+            console.log('No builtOn field in build data:', buildData);
+          }
+        } else {
+          console.log('Failed to fetch build details, status:', buildResponse.status);
+        }
+      } catch (buildError) {
+        console.log('Failed to fetch build node info:', buildError);
+      }
+      
+      return { jobBaseUrl, buildNumber, buildBaseUrl, builtOn, nodeUrl };
     } catch (error) {
       console.log('Failed to resolve last build info:', error);
       return null;
@@ -543,6 +644,18 @@
   function getJenkinsSiteUrl(url = window.location.href) {
     const siteInfo = getMatchedSiteInfo(url);
     if (siteInfo?.siteUrl) return siteInfo.siteUrl;
+
+    // Extract site URL by removing /view/ or /job/ paths
+    const siteMatch = String(url).match(/^(https?:\/\/[^?#]+?)(?:\/(?:view|job|computer|build)\/.+)?$/i);
+    if (siteMatch) {
+      const potentialSite = siteMatch[1].replace(/\/$/, '');
+      // If we found a view or job, extract everything before it
+      const viewJobMatch = String(url).match(/^(https?:\/\/[^?#]+?)\/(?:view|job)\//i);
+      if (viewJobMatch) {
+        return viewJobMatch[1].replace(/\/$/, '');
+      }
+      return potentialSite;
+    }
 
     const originMatch = String(url).match(/^(https?:\/\/[^\/]+(?:\/[^\/]+)?)/i);
     return originMatch ? originMatch[1].replace(/\/$/, '') : null;
@@ -1555,6 +1668,30 @@
     return url;
   }
 
+  // Check if a URL is a real job (not a folder/view with jobs inside)
+  async function isRealJob(url) {
+    try {
+      const jobBaseUrl = getJobBaseUrl(url);
+      if (!jobBaseUrl) return false;
+      
+      const apiUrl = normalizeUrlProtocolForCurrentPage(`${jobBaseUrl}/api/json?tree=_class,views`);
+      const response = await fetch(apiUrl, { credentials: 'include' });
+      if (!response.ok) return false;
+      
+      const data = await response.json();
+      // If views field exists and has items, it's a folder/view, not a job
+      if (data?.views && Array.isArray(data.views)) {
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.log('Failed to check if URL is real job:', url, error);
+      // On error, assume it might be a job (don't filter out)
+      return true;
+    }
+  }
+
   // Get top visited URLs from storage
   async function getTopVisitedUrls() {
     try {
@@ -1565,7 +1702,7 @@
 
       const entries = Object.entries(urlHistory);
       const viewMap = new Map();
-      const jobsWithData = [];
+      const potentialJobsWithData = [];
 
       entries.forEach(([url, data]) => {
         const viewMatch = url.match(/(https?:\/\/.+?\/view\/[^\/]+\/)/);
@@ -1582,31 +1719,64 @@
           }
         }
 
-        if (url.match(/\/view\/[^\/]+\/job\/[^\/]+\/?$/)) {
-          jobsWithData.push({ url, count: data.count, lastVisit: data.lastVisit });
+        // Check if URL is a job (including multi-level jobs like /job/folder/job/name)
+        // Use getJobBaseUrl which supports multi-level jobs via JOB_BASE_URL_PATTERN
+        const jobBaseUrl = getJobBaseUrl(url);
+        if (jobBaseUrl) {
+          // Verify it's a job URL by checking if normalized URL ends with the job pattern
+          const normalizedUrl = url.replace(/\/$/, '') + '/';
+          const jobPattern = jobBaseUrl.replace(/\/$/, '') + '/';
+          if (normalizedUrl === jobPattern || normalizedUrl.startsWith(jobPattern)) {
+            potentialJobsWithData.push({ url, count: data.count, lastVisit: data.lastVisit });
+          }
         }
       });
+
+      // Filter out folders/views that look like jobs by checking API
+      const jobsWithData = [];
+      for (const item of potentialJobsWithData) {
+        if (await isRealJob(item.url)) {
+          jobsWithData.push(item);
+        } else {
+          console.log('Filtered out folder/view from jobs:', item.url);
+        }
+      }
 
       const views = Array.from(viewMap.entries())
         .map(([url, data]) => ({ url, count: data.count }))
         .sort((a, b) => a.count - b.count)
         .slice(-4);
 
+      // Frequent Jobs: Top 5 by visit count
       const topJobs = [...jobsWithData]
         .sort((a, b) => b.count - a.count)
         .slice(0, 5);
 
-      const topJobUrls = new Set(topJobs.map(j => j.url));
+      const topJobUrls = new Set(topJobs.map(j => normalizeComparableUrl(j.url)));
 
-      const recentJobs = [...jobsWithData]
-        .filter(j => !topJobUrls.has(j.url))
-        .sort((a, b) => a.lastVisit - b.lastVisit)
-        .slice(-3);
+      // Recent Jobs: Most recent 5 by lastVisit (exclude duplicates from frequent jobs)
+      const recentJobsCandidates = [...jobsWithData]
+        .filter(j => !topJobUrls.has(normalizeComparableUrl(j.url)))
+        .sort((a, b) => b.lastVisit - a.lastVisit)
+        .slice(0, 5);
+
+      // If not enough recent jobs (less than 5), fill with frequent jobs by recent visit
+      const recentJobs = recentJobsCandidates.length >= 5 
+        ? recentJobsCandidates
+        : [
+            ...recentJobsCandidates,
+            ...topJobs
+              .filter(j => !recentJobsCandidates.some(r => normalizeComparableUrl(r.url) === normalizeComparableUrl(j.url)))
+              .sort((a, b) => b.lastVisit - a.lastVisit)
+          ].slice(0, 5);
+
+      console.log('Frequent Jobs (by count):', topJobs);
+      console.log('Recent Jobs (by lastVisit):', recentJobs);
 
       return {
         views,
         jobs: topJobs.reverse(),
-        recentJobs
+        recentJobs: recentJobs.reverse()
       };
     } catch (error) {
       console.error('Failed to get URL history:', error);
@@ -1681,7 +1851,7 @@
         const displayUrl = shortenUrl(item.url, window.innerWidth * 0.35);
         content += `
           <div class="url-item job-item frequent-job-item" data-url="${item.url}" data-bg="rgba(0, 139, 139, 0.6)" data-hover="rgba(0, 111, 111, 0.8)" style="
-            padding: 10px 52px 10px 10px;
+            padding: 10px 83px 10px 10px;
             margin: 8px 0;
             background: rgba(0, 139, 139, 0.6);
             border-radius: 4px;
@@ -1692,6 +1862,7 @@
             position: relative;
           ">
             <div style="font-size: 14px; position: relative; z-index: 2;">${displayUrl}</div>
+            <div style="position: absolute; right: 41px; top: 50%; transform: translateY(-50%); z-index: 3; width: 26px; height: 20px; line-height: 20px; text-align: center; border: 1px solid #000; border-radius: 2px; background: #fff; color: #000; font-size: 12px; font-weight: bold; font-family: Arial, sans-serif;">⚙</div>
             <div style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 3; width: 26px; height: 20px; line-height: 20px; text-align: center; border: 1px solid #000; border-radius: 2px; background: #fff; color: #000; font-size: 13px; font-weight: bold; font-family: 'Courier New', monospace;">&gt;_</div>
           </div>
         `;
@@ -1706,7 +1877,7 @@
         const displayUrl = shortenUrl(item.url, window.innerWidth * 0.35);
         content += `
           <div class="url-item job-item recent-job-item" data-url="${item.url}" data-bg="rgba(70, 130, 180, 0.6)" data-hover="rgba(60, 111, 153, 0.8)" style="
-            padding: 10px 52px 10px 10px;
+            padding: 10px 83px 10px 10px;
             margin: 8px 0;
             background: rgba(70, 130, 180, 0.6);
             border-radius: 4px;
@@ -1717,6 +1888,7 @@
             position: relative;
           ">
             <div style="font-size: 14px; position: relative; z-index: 2;">${displayUrl}</div>
+            <div style="position: absolute; right: 41px; top: 50%; transform: translateY(-50%); z-index: 3; width: 26px; height: 20px; line-height: 20px; text-align: center; border: 1px solid #000; border-radius: 2px; background: #fff; color: #000; font-size: 12px; font-weight: bold; font-family: Arial, sans-serif;">⚙</div>
             <div style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); z-index: 3; width: 26px; height: 20px; line-height: 20px; text-align: center; border: 1px solid #000; border-radius: 2px; background: #fff; color: #000; font-size: 13px; font-weight: bold; font-family: 'Courier New', monospace;">&gt;_</div>
           </div>
         `;
@@ -1743,7 +1915,7 @@
       });
     });
 
-    // Add click handlers for job items (split click: left=job, right=console)
+    // Add click handlers for job items (icon click: specific action, other area: job URL)
     menu.querySelectorAll('.job-item').forEach(item => {
       item.addEventListener('mouseenter', (e) => {
         e.currentTarget.style.background = e.currentTarget.getAttribute('data-hover') || 'rgba(0, 111, 111, 0.8)';
@@ -1760,11 +1932,43 @@
 
           let targetUrl = url;
 
-          if (clickX > elementWidth / 2) {
+          // Console icon area: right: 10px, width: 26px → click area: elementWidth - 36 or more
+          if (clickX > elementWidth - 36) {
             const lastBuildInfo = await getLastBuildInfo(url);
             if (!lastBuildInfo?.buildBaseUrl) return;
             targetUrl = `${lastBuildInfo.buildBaseUrl}/console`;
           }
+          // Node icon area: right: 41px, width: 26px → click area: elementWidth - 67 to elementWidth - 36
+          else if (clickX > elementWidth - 67 && clickX <= elementWidth - 36) {
+            console.log('Node icon clicked, fetching build info for URL:', url);
+            const lastBuildInfo = await getLastBuildInfo(url);
+            console.log('Last build info:', lastBuildInfo);
+            
+            if (!lastBuildInfo || !lastBuildInfo.buildBaseUrl) {
+              console.error('Could not fetch build information');
+              showActionNotice('Cannot find node');
+              // Still try to navigate to job URL as fallback
+              targetUrl = url;
+            } else {
+              // Check if we have valid node information
+              const hasValidNode = lastBuildInfo.builtOn && 
+                                   lastBuildInfo.builtOn.toLowerCase() !== 'built-in node' &&
+                                   lastBuildInfo.builtOn.toLowerCase() !== '(built-in)' &&
+                                   lastBuildInfo.builtOn.toLowerCase() !== 'master' &&
+                                   lastBuildInfo.builtOn.toLowerCase() !== '(master)';
+              
+              if (hasValidNode && lastBuildInfo.nodeUrl) {
+                // Valid node found, navigate to node
+                targetUrl = lastBuildInfo.nodeUrl;
+              } else {
+                // No valid node info, fallback to console
+                console.log('No valid node info, fallback to console');
+                showActionNotice('Cannot find node');
+                targetUrl = `${lastBuildInfo.buildBaseUrl}/console`;
+              }
+            }
+          }
+          // All other area: job URL (default)
 
           window.location.href = targetUrl;
           hideUrlMenu();
