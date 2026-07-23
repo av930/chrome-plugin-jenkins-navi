@@ -23,8 +23,8 @@
     "configure": "configure"
   },
   "custom": {
-   "honda26my": ["http://jenkins.rge.com/jenkins06/view/", "http://jenkins.rge.com/jenkins06/job/honda_buildchecker/"],
-   "connect_w": ["http://jenkins.rge.com/jenkins03/view/", "http://jenkins.rge.com/jenkins03/job/ccc_Atriggerbuild/"],
+    "honda26my": ["http://jenkins.rge.com/jenkins06/view/", "http://jenkins.rge.com/jenkins06/job/honda_buildchecker/"],
+    "connect_w": ["http://jenkins.rge.com/jenkins03/view/", "http://jenkins.rge.com/jenkins03/job/ccc_Atriggerbuild/"],
     "vgit_na": "https://vgit.rge.com/na",
     "vgit_eu": "https://vgit.rge.com/eu",
     "vgit_as": "https://vgit.rge.com/as",

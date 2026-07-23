@@ -345,7 +345,7 @@
   // Detect if current page is a Jenkins site (based on configured sites)
   async function isJenkinsSite() {
     try {
-      if (!chrome.runtime?.id) return;
+      if (!chrome.runtime?.id) return window.location.href.includes('jenkins');
 
       const result = await chrome.storage.local.get(['userConfigText']);
       if (result.userConfigText) {
@@ -493,6 +493,28 @@
       const details = section.toggle.closest('details');
       if (details && !details.open) {
         details.open = true;
+      }
+    }
+  }
+
+  function collapseNodeBuildExecutorStatus() {
+    const executorsPane = document.getElementById('executors');
+    if (executorsPane && !executorsPane.classList.contains('collapsed')) {
+      const toggleLink = executorsPane.querySelector('a[href*="toggleCollapse?paneId=executors"]');
+      if (toggleLink) {
+        toggleLink.click();
+        return;
+      }
+    }
+
+    const section = findBuildExecutorStatusSection();
+    if (!section) return;
+
+    if (!isSectionCollapsed(section.toggle, section.content)) {
+      section.toggle.click();
+      const details = section.toggle.closest('details');
+      if (details && details.open) {
+        details.open = false;
       }
     }
   }
@@ -1375,6 +1397,7 @@
     hideShortcuts();
     hideUrlMenu();
     updateFButtonState();
+    collapseNodeBuildExecutorStatus();
   }
 
   function toggleFMode() {
@@ -1808,7 +1831,7 @@
     if (urlMenuVisible) return;
 
     if (!chrome.runtime?.id) {
-      alert('Extension was reloaded. Please refresh this page (F5) to use the URL menu.');
+      showActionNotice('Extension reloaded - refresh page (F5)');
       return;
     }
 
