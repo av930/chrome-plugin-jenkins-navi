@@ -106,7 +106,7 @@ function resolveValueType(value) {
 }
 
 // Handle internal function calls from popup
-async function handleInternalFunction(funcName) {
+async function handleInternalFunction(funcName, openInNewTab = false) {
   const server = getSelectedServer();
   const siteUrl = server ? config.sites[server] : null;
 
@@ -119,9 +119,7 @@ async function handleInternalFunction(funcName) {
     const labelPageUrl = chrome.runtime.getURL(
       `label_page.html?server=${encodeURIComponent(server)}&site=${encodeURIComponent(siteUrl)}`
     );
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      chrome.tabs.update(tabs[0].id, { url: labelPageUrl });
-    });
+    openUrl(labelPageUrl, openInNewTab);
   } else if (funcName === 'report' || funcName === 'z-report') {
     // Send message to content script to generate z-report
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -218,16 +216,16 @@ function createButtonsInOrder() {
     console.log(`Creating buttons for section: ${sectionName}`);
 
     if (sectionName === 'menus') {
-      createSectionButtons(sectionData, 'menu-btn', sectionName, (menuName, menuPath) => {
-        handleMenuClick(menuName, menuPath, sectionName);
+      createSectionButtons(sectionData, 'menu-btn', sectionName, (menuName, menuPath, openInNewTab) => {
+        handleMenuClick(menuName, menuPath, sectionName, openInNewTab);
       });
     } else if (sectionName === 'run') {
-      createSectionButtons(sectionData, 'run-btn', sectionName, (runName, runPath) => {
-        handleRunClick(runPath, runName);
+      createSectionButtons(sectionData, 'run-btn', sectionName, (runName, runPath, openInNewTab) => {
+        handleRunClick(runPath, runName, openInNewTab);
       }, '▶ ');
     } else if (sectionName === 'job') {
-      createSectionButtons(sectionData, 'job-btn', sectionName, (jobName, jobPath) => {
-        handleJobClick(jobPath, sectionName, jobName);
+      createSectionButtons(sectionData, 'job-btn', sectionName, (jobName, jobPath, openInNewTab) => {
+        handleJobClick(jobPath, sectionName, jobName, openInNewTab);
       });
     } else if (sectionName === 'custom') {
       // custom은 URL에 따라 클래스가 다름
@@ -242,15 +240,15 @@ function createButtonsInOrder() {
         }
         button.dataset.action = customName;
         button.textContent = customName;
-        button.addEventListener('click', async () => {
+        addButtonClickHandlers(button, async (openInNewTab) => {
           const value = Array.isArray(customValue)
             ? await getNextArrayValue(sectionName, customName, customValue)
             : customValue;
           const resolved = resolveValueType(value);
           if (resolved.type === 'function') {
-            await handleInternalFunction(resolved.name);
+            await handleInternalFunction(resolved.name, openInNewTab);
           } else {
-            handleCustomClick(resolved.url);
+            handleCustomClick(resolved.url, openInNewTab);
           }
         });
         buttonGrid.appendChild(button);
@@ -268,15 +266,15 @@ function createSectionButtons(sectionData, className, sectionName, clickHandler,
     button.className = `action-btn ${className}`;
     button.dataset.action = name;
     button.textContent = prefix + name;
-    button.addEventListener('click', async () => {
+    addButtonClickHandlers(button, async (openInNewTab) => {
       const value = Array.isArray(pathOrArray)
         ? await getNextArrayValue(sectionName, name, pathOrArray)
         : pathOrArray;
       const resolved = resolveValueType(value);
       if (resolved.type === 'function') {
-        await handleInternalFunction(resolved.name);
+        await handleInternalFunction(resolved.name, openInNewTab);
       } else {
-        clickHandler(name, resolved.url);
+        clickHandler(name, resolved.url, openInNewTab);
       }
     });
     buttonGrid.appendChild(button);
@@ -376,8 +374,28 @@ function getSelectedServer() {
   return radio ? radio.value : null;
 }
 
+function addButtonClickHandlers(button, handler) {
+  button.addEventListener('click', () => handler(false));
+  button.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    handler(true);
+  });
+}
+
+function openUrl(url, openInNewTab = false, tabId) {
+  if (openInNewTab) {
+    chrome.tabs.create({ url, active: true });
+  } else if (tabId !== undefined) {
+    chrome.tabs.update(tabId, { url });
+  } else {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      chrome.tabs.update(tabs[0].id, { url });
+    });
+  }
+}
+
 // handleMenuClick handles menu button click
-async function handleMenuClick(menuName, menuPath, sectionName) {
+async function handleMenuClick(menuName, menuPath, sectionName, openInNewTab = false) {
   const server = getSelectedServer();
 
   if (!server) {
@@ -395,14 +413,11 @@ async function handleMenuClick(menuName, menuPath, sectionName) {
 
   console.log('Opening URL:', url);
 
-  // Open URL in current tab
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    chrome.tabs.update(tabs[0].id, { url: url });
-  });
+  openUrl(url, openInNewTab);
 }
 
 // Handle run button click (파라미터 입력 다이얼로그 열기)
-async function handleRunClick(runUrl, buttonName) {
+async function handleRunClick(runUrl, buttonName, openInNewTab = false) {
   // Get current page URL before opening dialog
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const currentPageUrl = tabs && tabs.length > 0 ? tabs[0].url : '';
@@ -412,6 +427,12 @@ async function handleRunClick(runUrl, buttonName) {
   const encodedButton = encodeURIComponent(buttonName);
   const encodedPageUrl = encodeURIComponent(currentPageUrl);
   const dialogUrl = `run_dialog.html?url=${encodedUrl}&button=${encodedButton}&pageUrl=${encodedPageUrl}`;
+
+  if (openInNewTab) {
+    openUrl(chrome.runtime.getURL(dialogUrl), true);
+    window.close();
+    return;
+  }
 
   // Open dialog window
   chrome.windows.create({
@@ -427,7 +448,7 @@ async function handleRunClick(runUrl, buttonName) {
 }
 
 // Handle custom button click (직접 URL로 이동)
-function handleCustomClick(customUrl) {
+function handleCustomClick(customUrl, openInNewTab = false) {
   console.log('Opening custom URL:', customUrl);
 
   // URL에 'jenkins'가 포함되어 있으면 sites 항목과 비교하여 라디오 버튼 선택
@@ -457,12 +478,12 @@ function handleCustomClick(customUrl) {
     const currentUrl = tabs[0].url;
     let targetUrl = customUrl;
 
-    chrome.tabs.update(tabs[0].id, { url: targetUrl });
+    openUrl(targetUrl, openInNewTab, tabs[0].id);
   });
 }
 
 // Handle job button click (현재 URL 분석 후 경로 추가)
-function handleJobClick(jobPath, sectionName, jobName) {
+function handleJobClick(jobPath, sectionName, jobName, openInNewTab = false) {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const currentUrl = tabs[0].url;
     let newUrl = '';
@@ -509,7 +530,7 @@ function handleJobClick(jobPath, sectionName, jobName) {
     }
 
     console.log('Opening new URL:', newUrl);
-    chrome.tabs.update(tabs[0].id, { url: newUrl });
+    openUrl(newUrl, openInNewTab, tabs[0].id);
   });
 }
 
