@@ -15,6 +15,7 @@
   let gShortcutChainActive = false;
   let gBottomReachedCount = 0;
   let bTopReachedCount = 0;
+  let fKeyNewTab = false; // Setting: open f-key page moves in a new tab to the right
 
   const JOB_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(?:\/job\/[^\/]+)*)\/?\/?/;
   const BUILD_BASE_URL_PATTERN = /^(.*?\/job\/[^\/]+(?:\/job\/[^\/]+)*\/\d+)\/?/;
@@ -31,6 +32,17 @@
     }
 
     return normalizedUrl;
+  }
+
+  // Navigate for f-key shortcuts: new tab right of current (setting) or current tab
+  function openUrl(url) {
+    if (fKeyNewTab && chrome.runtime?.id) {
+      chrome.runtime.sendMessage({ type: 'openTabRight', url }, (response) => {
+        if (chrome.runtime.lastError || !response?.ok) window.location.href = url;
+      });
+      return;
+    }
+    window.location.href = url;
   }
 
   function normalizeComparableUrl(url) {
@@ -338,7 +350,7 @@
     if (!viewMatch?.[1]) return false;
 
     deactivateFMode();
-    window.location.href = `${viewMatch[1].replace(/\/+$/, '')}/`;
+    openUrl(`${viewMatch[1].replace(/\/+$/, '')}/`);
     return true;
   }
 
@@ -711,7 +723,7 @@
     if (!jobBaseUrl) return false;
 
     deactivateFMode();
-    window.location.href = `${jobBaseUrl}/configure`;
+    openUrl(`${jobBaseUrl}/configure`);
     return true;
   }
 
@@ -720,7 +732,7 @@
     if (!nodeBaseUrl) return false;
 
     deactivateFMode();
-    window.location.href = `${nodeBaseUrl}/configure`;
+    openUrl(`${nodeBaseUrl}/configure`);
     return true;
   }
 
@@ -729,7 +741,7 @@
     if (!jobBaseUrl) return false;
 
     deactivateFMode();
-    window.location.href = `${jobBaseUrl}/jobConfigHistory`;
+    openUrl(`${jobBaseUrl}/jobConfigHistory`);
     return true;
   }
 
@@ -766,7 +778,7 @@
     const nodeBaseUrl = getNodeBaseUrl();
     if (nodeBaseUrl) {
       deactivateFMode();
-      window.location.href = `${nodeBaseUrl}/log`;
+      openUrl(`${nodeBaseUrl}/log`);
       return true;
     }
 
@@ -774,7 +786,7 @@
     if (!targetUrl) return false;
 
     deactivateFMode();
-    window.location.href = targetUrl;
+    openUrl(targetUrl);
     return true;
   }
 
@@ -803,7 +815,7 @@
     const nodeBaseUrl = getNodeBaseUrl();
     if (nodeBaseUrl) {
       deactivateFMode();
-      window.location.href = `${nodeBaseUrl}/log`;
+      openUrl(`${nodeBaseUrl}/log`);
       return true;
     }
 
@@ -811,7 +823,7 @@
     if (!targetUrl) return false;
 
     deactivateFMode();
-    window.location.href = targetUrl;
+    openUrl(targetUrl);
     return true;
   }
 
@@ -868,7 +880,7 @@
     }
 
     deactivateFMode();
-    window.location.href = nodeUrl;
+    openUrl(nodeUrl);
     return true;
   }
 
@@ -893,7 +905,7 @@
       if (!lastBuildInfo?.buildBaseUrl) return false;
 
       deactivateFMode();
-      window.location.href = `${lastBuildInfo.buildBaseUrl}/console`;
+      openUrl(`${lastBuildInfo.buildBaseUrl}/console`);
       return true;
     }
 
@@ -916,7 +928,7 @@
 
     const relativeSuffix = getBuildRelativeSuffix();
     deactivateFMode();
-    window.location.href = `${jobBaseUrl}/${nextBuildNumber}${relativeSuffix}`;
+    openUrl(`${jobBaseUrl}/${nextBuildNumber}${relativeSuffix}`);
     return true;
   }
 
@@ -1232,7 +1244,7 @@
     showActionNotice(message);
     deactivateFMode();
     window.setTimeout(() => {
-      window.location.href = url;
+      openUrl(url);
     }, 1000);
     return true;
   }
@@ -1299,7 +1311,7 @@
     }
 
     if (link.href && link.href !== '#' && link.href !== 'javascript:void(0)') {
-      window.location.href = link.href;
+      openUrl(link.href);
     } else {
       link.click();
     }
@@ -2941,6 +2953,16 @@
   async function init() {
     const isJenkins = await isJenkinsSite();
     if (!isJenkins) return;
+
+    try {
+      const stored = await chrome.storage.local.get(['fKeyNewTab']);
+      fKeyNewTab = stored.fKeyNewTab === true;
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area === 'local' && changes.fKeyNewTab) fKeyNewTab = changes.fKeyNewTab.newValue === true;
+      });
+    } catch (error) {
+      console.error('Failed to load fKeyNewTab setting:', error);
+    }
 
     addNavigationButtons();
     await saveUrlVisit(window.location.href);

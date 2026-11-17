@@ -103,6 +103,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const uploadInput = document.getElementById('uploadInput');
   const defaultConfigPre = document.getElementById('defaultConfig');
 
+  // f key page move: open in new tab (default: unchecked)
+  const fKeyNewTab = document.getElementById('fKeyNewTab');
+  const { fKeyNewTab: savedFKeyNewTab } = await chrome.storage.local.get(['fKeyNewTab']);
+  fKeyNewTab.checked = savedFKeyNewTab === true;
+  fKeyNewTab.addEventListener('change', async () => {
+    await chrome.storage.local.set({ fKeyNewTab: fKeyNewTab.checked });
+    showStatus('Setting saved');
+  });
+
   // Load and display current config
   const currentConfigText = await loadConfig();
   configEditor.value = currentConfigText;

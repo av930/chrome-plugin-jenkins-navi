@@ -155,6 +155,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.type === 'openTabRight') {
+    chrome.tabs.create({
+      url: request.url,
+      active: true,
+      index: sender.tab.index + 1,
+      openerTabId: sender.tab.id
+    })
+      .then(() => {
+        sendResponse({ ok: true });
+      })
+      .catch(err => {
+        console.error('Failed to open tab:', err);
+        sendResponse({ ok: false, error: err.toString() });
+      });
+    return true;
+  }
+
   if (request.type === 'cloneTab') {
     const currentUrl = sender.tab.url;
     const currentIndex = sender.tab.index;
