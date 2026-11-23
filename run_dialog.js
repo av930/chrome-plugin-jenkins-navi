@@ -64,6 +64,24 @@ const DEFAULT_PARAMS = `ACTION=remove_history
 PARAM1=http://vjenkins.rge.com/job/11.automigration_downSrcMig/
 PARAM2=0-11`;
 
+// Default parameters text for the compare button (job config compare)
+const COMPARE_DEFAULT_PARAMS = `ACTION=compare_jobconfig
+PARAM1=http://vjenkins.rge.com/job/job_A/
+PARAM2=http://vjenkins.rge.com/job/job_B/`;
+
+// Parse "KEY=VALUE" lines into an object (first '=' splits key and value)
+function parseParamLines(text) {
+  const result = {};
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    const eqIndex = trimmed.indexOf('=');
+    if (eqIndex > 0) {
+      result[trimmed.substring(0, eqIndex).trim()] = trimmed.substring(eqIndex + 1).trim();
+    }
+  }
+  return result;
+}
+
 // ========== Detect Mode: Popup or Run Dialog ==========
 const urlParams = new URLSearchParams(window.location.search);
 let baseUrl = decodeURIComponent(urlParams.get('url') || '');
@@ -549,7 +567,7 @@ async function loadParameters() {
     console.error('Failed to load parameters:', error);
   }
 
-  return DEFAULT_PARAMS;
+  return runButton === 'compare' ? COMPARE_DEFAULT_PARAMS : DEFAULT_PARAMS;
 }
 
 // Save parameters to storage
@@ -596,6 +614,33 @@ async function initializeRunDialog() {
   // Run button click handler
   document.getElementById('runBtn').addEventListener('click', async () => {
     const paramsText = textarea.value.trim();
+
+    // ACTION=compare_jobconfig: job을 trigger하지 않고 compare page를 새 tab에서 연다 (baseUrl은 사용하지 않음)
+    const compareParams = parseParamLines(paramsText);
+    if (compareParams.ACTION === 'compare_jobconfig') {
+      if (!compareParams.PARAM1 || !compareParams.PARAM2) {
+        alert('PARAM1, PARAM2에 비교할 job URL을 입력하세요.');
+        return;
+      }
+      try {
+        await saveParameters(paramsText);
+        const dialogWindow = await chrome.windows.getCurrent();
+        const targetWindow = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+        if (targetWindow.id === undefined) {
+          throw new Error('일반 브라우저 창을 찾을 수 없습니다.');
+        }
+        const compareUrl = chrome.runtime.getURL(
+          `compare_page.html?p1=${encodeURIComponent(compareParams.PARAM1)}&p2=${encodeURIComponent(compareParams.PARAM2)}`
+        );
+        await chrome.tabs.create({ windowId: targetWindow.id, url: compareUrl, active: true });
+        await chrome.windows.update(targetWindow.id, { focused: true });
+        await chrome.windows.remove(dialogWindow.id);
+      } catch (error) {
+        console.error('Failed to open compare page:', error);
+        alert('compare page를 열지 못했습니다: ' + error.message);
+      }
+      return;
+    }
 
     if (!baseUrl) {
       alert('Base URL is missing!');

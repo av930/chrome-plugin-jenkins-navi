@@ -190,3 +190,65 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
+
+// ========== Compare 저장 ==========
+// compare 화면의 저장용 iframe에 실제 Jenkins configure 페이지를 띄우고, 그 frame에서 job_config_save.js를 실행한다.
+// Jenkins는 X-Frame-Options/CSP로 iframe을 막으므로, 저장 중에만 해당 compare tab의 sub_frame 응답에서 두 header를 제거한다.
+// compare tab당 저장은 한 번에 하나이므로 tab id를 session rule id로 쓴다.
+async function allowCompareSaveFrame(tabId, configUrl) {
+  const url = new URL(configUrl);
+  if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Jenkins URL이 아닙니다');
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [tabId],
+    addRules: [{
+      id: tabId,
+      priority: 1,
+      action: {
+        type: 'modifyHeaders',
+        responseHeaders: [
+          { header: 'x-frame-options', operation: 'remove' },
+          { header: 'content-security-policy', operation: 'remove' }
+        ]
+      },
+      condition: { tabIds: [tabId], resourceTypes: ['sub_frame'], requestDomains: [url.hostname] }
+    }]
+  });
+}
+
+function endCompareSaveFrame(tabId) {
+  return chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [tabId] });
+}
+
+async function runCompareSave(tabId, edits) {
+  // compare 화면의 다른 iframe(원문 view)은 about:blank이므로 http(s) 하위 frame은 저장용 iframe뿐이다.
+  const frames = ((await chrome.webNavigation.getAllFrames({ tabId })) || [])
+    .filter((frame) => frame.parentFrameId === 0 && /^https?:/.test(frame.url));
+  if (frames.length !== 1) throw new Error('저장용 iframe에 Jenkins 페이지를 띄우지 못했습니다 (로그인/iframe 차단 확인)');
+  const frame = frames[0];
+  if (!/\/configure\/?$/.test(new URL(frame.url).pathname)) {
+    throw new Error(`Jenkins 설정 화면이 아닌 페이지가 열렸습니다 (로그인 확인): ${frame.url}`);
+  }
+  const target = { tabId, frameIds: [frame.frameId] };
+  await chrome.scripting.executeScript({ target, world: 'MAIN', files: ['compare_extract.js', 'job_config_save.js'] });
+  const [injection] = await chrome.scripting.executeScript({
+    target, world: 'MAIN', func: (changes) => globalThis.ComparedJobSave.save(changes), args: [edits]
+  });
+  return injection?.result || { ok: false, message: 'Jenkins 저장 스크립트 응답 없음' };
+}
+
+chrome.tabs.onRemoved.addListener((tabId) => { endCompareSaveFrame(tabId).catch(() => {}); });
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type !== 'compareSave') return;
+  (async () => {
+    const tabId = sender.tab?.id;
+    if (!Number.isInteger(tabId) || !sender.url?.startsWith(chrome.runtime.getURL('compare_page.html'))) {
+      throw new Error('비교 화면의 저장 요청이 아닙니다');
+    }
+    if (request.step === 'allow') await allowCompareSaveFrame(tabId, request.configUrl);
+    else if (request.step === 'run') return runCompareSave(tabId, request.edits);
+    else await endCompareSaveFrame(tabId);
+    return { ok: true };
+  })().then(sendResponse, (error) => sendResponse({ ok: false, message: error.message }));
+  return true;
+});

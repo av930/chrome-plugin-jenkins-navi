@@ -41,6 +41,7 @@ const DEFAULT_CONFIG = {
   "run": { 
     "rm-history": "http://jenkins.rge.com/jenkins03/job/_SFolder_CommonUtility/job/ControlJenkins/buildWithParameters?token=plugin",
     "retrigger": "http://jenkins.rge.com/jenkins03/job/Common_retriggerJOB/buildWithParameters?token=plugin",
+    "compare": "compare_jobconfig",
     "temp_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin"
   }
 };
