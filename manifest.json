@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Jenkins Navigator",
-  "version": "3.2",
+  "version": "3.3",
   "description": "Quick navigation to Jenkins and other tools",
   "action": {
     "default_popup": "run_dialog.html",
@@ -27,9 +27,17 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["help.js", "jenkins-shortcuts.js"],
-      "css": ["jenkins-shortcuts.css"],
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "help.js",
+        "jenkins-shortcuts.js"
+      ],
+      "css": [
+        "jenkins-shortcuts.css"
+      ],
       "run_at": "document_idle"
     }
   ],
@@ -37,5 +45,6 @@
     "16": "icon16.png",
     "48": "icon48.png",
     "128": "icon128.png"
-  }
+  },
+  "version_name": "261123_3c06"
 }
