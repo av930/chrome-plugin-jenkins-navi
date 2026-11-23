@@ -700,5 +700,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
       });
     }, 100);
+
+    // 이미 선택된 jenkins 라디오 버튼을 다시 click하면 해당 Jenkins main page를 현재 tab에서 연다.
+    // click 시점에는 checked가 이미 true이므로 pointerdown 시점의 선택 상태를 기록해 둔다.
+    const radioGroup = document.getElementById('radioGroup');
+    let wasChecked = false;
+
+    radioGroup.addEventListener('pointerdown', (e) => {
+      const input = e.target.closest('label')?.querySelector('input[name="server"]');
+      wasChecked = !!(input && input.checked);
+    }, true);
+
+    radioGroup.addEventListener('click', (e) => {
+      // label click은 input으로 synthetic click이 한 번 더 전달되므로 input의 click만 처리
+      if (!e.target.matches('input[name="server"]')) return;
+      const reclicked = wasChecked;
+      wasChecked = false;
+      const siteUrl = config.sites && config.sites[e.target.value];
+      if (reclicked && siteUrl) {
+        openUrl(siteUrl);
+      }
+    });
   }
 });
