@@ -452,12 +452,12 @@ async function handleRunClick(runUrl, buttonName, openInNewTab = false) {
     return;
   }
 
-  // Open dialog window
+  // Open dialog window (search는 Usage & Result 영역이 있어 더 높게 연다)
   chrome.windows.create({
     url: dialogUrl,
     type: 'popup',
     width: 1040,
-    height: 450,
+    height: findActionModule(runUrl) ? 640 : 450,
     left: 300,
     top: 200
   });
@@ -714,6 +714,90 @@ async function initializeRunDialog() {
   });
 }
 
+// run 값(Config/Log/Name | RemoveHistory)에 해당하는 action module (없으면 null)
+function findActionModule(value) {
+  return [JobSearch, JobRemoveHistory].find(m => m.isAction(value)) || null;
+}
+
+// Initialize search dialog (run 값이 Config/Log/Name인 경우)
+// job을 trigger하지 않고 현재 page(view/folder/job)를 대상으로 직접 검색해 결과를 Usage & Result에 표시한다.
+async function initializeSearchDialog() {
+  const actionModule = findActionModule(baseUrl);
+  const textarea = document.getElementById('paramsInput');
+  const result = document.getElementById('searchResult');
+  const runBtn = document.getElementById('runBtn');
+
+  document.body.classList.add('search-mode');
+  document.getElementById('previousParamsTitle').style.display = 'none';
+  document.getElementById('previousParams').style.display = 'none';
+
+  // 이전 검색 조건이 있으면 그대로 복원, 없으면 default
+  const storageKey = `run_cmd_${runButton}`;
+  const saved = (await chrome.storage.local.get([storageKey]))[storageKey];
+  textarea.value = saved && actionModule.isAction(actionModule.parseParams(saved).action) ? saved : actionModule.defaultParams(baseUrl);
+  textarea.focus();
+  result.innerHTML = `<pre class="usage">${JobSearch.escapeHtml(actionModule.USAGE)}</pre>`;
+
+  // 결과가 영역보다 길어지면 window를 화면 최대 높이로 한 번 확장한다
+  let expanded = false;
+  const expandIfOverflow = async () => {
+    if (expanded || result.scrollHeight <= result.clientHeight) return;
+    expanded = true;
+    const win = await chrome.windows.getCurrent();
+    await chrome.windows.update(win.id, { top: screen.availTop, height: screen.availHeight });
+  };
+
+  // 결과 link는 일반 browser window의 새 tab으로 연다
+  result.addEventListener('click', async (e) => {
+    const link = e.target.closest('a[href]');
+    if (!link) return;
+    e.preventDefault();
+    const targetWindow = await chrome.windows.getLastFocused({ windowTypes: ['normal'] });
+    await chrome.tabs.create({ windowId: targetWindow.id, url: link.href, active: true });
+  });
+
+  runBtn.addEventListener('click', async () => {
+    await chrome.storage.local.set({ [storageKey]: textarea.value });
+    const params = actionModule.parseParams(textarea.value);
+    result.innerHTML = '<div class="status"></div><div class="hits"></div><div class="errors"></div>';
+    const status = result.querySelector('.status');
+    const hits = result.querySelector('.hits');
+    const errors = result.querySelector('.errors');
+    const ui = {
+      status: (text) => { status.textContent = text; },
+      info: (text) => {
+        errors.insertAdjacentHTML('beforeend', `<div class="status">${JobSearch.escapeHtml(text)}</div>`);
+      },
+      confirm: (text) => window.confirm(text),
+      hit: (html) => { hits.insertAdjacentHTML('beforeend', html); expandIfOverflow(); },
+      error: (text) => {
+        errors.insertAdjacentHTML('beforeend', `<div class="error">${JobSearch.escapeHtml(text)}</div>`);
+        expandIfOverflow();
+      }
+    };
+
+    runBtn.disabled = true;
+    try {
+      await actionModule.run(params, pageUrl, ui);
+    } catch (error) {
+      console.error('Search failed:', error);
+      ui.error(error.message);
+    } finally {
+      runBtn.disabled = false;
+    }
+  });
+
+  document.getElementById('cancelBtn').addEventListener('click', () => {
+    window.close();
+  });
+
+  textarea.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 'Enter') {
+      runBtn.click();
+    }
+  });
+}
+
 // ========== Initialize Based on Mode ==========
 document.addEventListener('DOMContentLoaded', async () => {
   if (isRunDialogMode) {
@@ -726,7 +810,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load config for sites information
     await loadConfig();
 
-    await initializeRunDialog();
+    if (findActionModule(baseUrl)) {
+      await initializeSearchDialog();
+    } else {
+      await initializeRunDialog();
+    }
   } else {
     // Popup Mode
     console.log('Initializing Popup Mode');

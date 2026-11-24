@@ -56,6 +56,40 @@ compare 이후 Jenkins에서 원래 값이 바뀐 항목은 덮어쓰지 않으�
 Job Config History도 자동으로 새 tab에 열지 않는다. 필요하면 직접 접근한다. password/hidden 항목은 저장 대상에서 제외된다.
 Jenkins의 iframe 차단(`X-Frame-Options`, `Content-Security-Policy`) header는 저장 중인 compare tab의 해당 Jenkins host sub_frame 응답에서만 제거하고, 완료/실패/tab 닫기 시 규칙을 지운다.
 
+## Job 검색 (search)
+
+config의 `run` 섹션에서 값이 `Config`, `Log`, `Name` 중 하나인 버튼(예: `"search": "Config"`)을 누르면 검색 창이 뜬다. 값은 `Action`의 default가 된다. `Action` 값은 대소문자와 앞뒤 공백/따옴표를 가리지 않는다(`log`, `NaMe`, `"Config" ` 모두 가능).
+
+```
+Action=Config          #[Config|Log|Name|History]
+SearchPattern=""        #Regexp(ex: .*_build)
+FilterIn=""             #Regexp(ex1:^trigger_*(di|ci)_release, ex2: 27~36|~36|27~ )
+```
+
+Execute 하면 job을 trigger하지 않고 창을 연 시점의 현재 page를 대상으로 직접 검색한다.
+
+- 현재 page가 view/folder: 보이는 모든 job이 대상. `FilterIn`은 job name RegExp (비우면 전체).
+- 현재 page가 job/build: 해당 job이 대상. `FilterIn`은 build 범위 (`27~36`, `~36`, `27~`, `40`; `,` `|` 공백으로 여러 개, 비우면 전체). 범위 구분자는 `~`이다.
+- `Config`: job의 `config.xml`. `Log`: build `consoleText` (view/folder에서는 각 job의 lastBuild만). `Name`: build 표시 이름과 description.
+- `History`: job page에서만. `<job>/jobConfigHistory/`의 각 version(`configOutput?type=raw&timestamp=...`)의 config를 검색한다. `FilterIn`은 날짜 범위(`2024-07-02_19-12-25~2026-07-23_17-04-12`, `2024-07-02_19-12-25~`, `~2026-07-23`, 단일 값; 앞부분만 써도 되고 끝값은 그 구간 전체 포함; `,` `|` 공백으로 여러 개, 비우면 전체 version).
+- `SearchPattern`은 문자열 검색과 RegExp 검색 중 하나라도 맞는 줄을 찾는다. RegExp가 잘못되면 문자열 검색만 한다.
+
+결과는 `Usage & Result`에 match된 줄(강조 표시)과 바로가기 link로 표시된다. link는 일반 browser 창의 새 tab에서 열린다. 결과가 길면 창을 화면 최대 높이로 늘리고 결과 영역에 scroll bar가 생긴다.
+
+## Build history 삭제 (RemoveHistory)
+
+config의 `run` 섹션에서 값이 `RemoveHistory`인 버튼(예: `"rmBHist": "RemoveHistory"`)을 누르면 삭제 창이 뜬다. 현재 보고 있는 job(또는 그 build page)의 build history에서 `Target` 범위의 build를 삭제한다.
+
+```
+Action=RemoveHistory
+Target="1000~"          #build 범위 (ex: 27~36|~36|27~|40), 필수
+```
+
+- view/folder page에서는 실행되지 않는다(job page에서만).
+- `Target`이 비어 있으면 실행하지 않는다.
+- Execute 하면 삭제 대상 개수와 범위를 보여주고 확인(confirm) 후 삭제한다. 삭제는 되돌릴 수 없다.
+- 각 build에 `POST <build>/doDelete`를 보내며 CSRF crumb은 `crumbIssuer`에서 받아 붙인다. 실패한 build는 error로 표시한다.
+
 ## 파일 구조
 
 - `manifest.json` - Extension 설정 파일

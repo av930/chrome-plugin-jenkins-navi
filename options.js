@@ -42,6 +42,8 @@ const DEFAULT_CONFIG = {
     "rm-history": "http://jenkins.rge.com/jenkins03/job/_SFolder_CommonUtility/job/ControlJenkins/buildWithParameters?token=plugin",
     "retrigger": "http://jenkins.rge.com/jenkins03/job/Common_retriggerJOB/buildWithParameters?token=plugin",
     "compare": "compare_jobconfig",
+    "search": "Config",
+    "rmBHist": "RemoveHistory",
     "temp_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin"
   }
 };

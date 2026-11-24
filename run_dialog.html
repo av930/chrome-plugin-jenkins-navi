@@ -98,6 +98,99 @@
       display: none;
     }
 
+    /* Search mode (Config/Log/Name): window 크기에 맞춰 폭/높이가 유동적으로 변한다 */
+    html:has(body.search-mode) {
+      width: auto;
+      height: 100%;
+    }
+
+    body.run-dialog-mode.search-mode {
+      width: auto;
+      min-width: 1040px; /* 좌우 padding 20px씩 제외하고 내용 최소 1000px */
+      height: 100vh;
+      overflow-x: auto;
+    }
+
+    .search-mode #runDialogContent {
+      height: 100%;
+    }
+
+    .search-mode #runDialogContent textarea {
+      width: 100%;
+    }
+
+    #searchSection {
+      display: none;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-height: 0;
+      padding-bottom: 15px;
+    }
+
+    .search-mode #searchSection {
+      display: flex;
+    }
+
+    #searchResult {
+      flex: 1 1 auto;
+      min-height: calc(1.5em * 5 + 16px);
+      overflow: auto;
+      padding: 8px;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      background-color: #1e1e1e;
+      color: #d4d4d4;
+      border: 1px solid #4caf50;
+      border-radius: 4px;
+      box-sizing: border-box;
+      width: 100%;
+    }
+
+    #searchResult pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+      font: inherit;
+    }
+
+    #searchResult .usage {
+      background-color: #2d2d30;
+      padding: 4px 8px;
+    }
+
+    #searchResult .status {
+      color: #4fc3f7;
+      margin-bottom: 6px;
+    }
+
+    #searchResult .error {
+      color: #f44336;
+    }
+
+    #searchResult .hit {
+      margin-bottom: 8px;
+    }
+
+    #searchResult .hit a {
+      color: #8ab4f8;
+    }
+
+    #searchResult .hit-count,
+    #searchResult .line-no {
+      color: #858585;
+      margin-left: 6px;
+    }
+
+    #searchResult .hit pre {
+      padding-left: 16px;
+    }
+
+    #searchResult mark {
+      background-color: #ffeb3b;
+      color: #000;
+    }
+
     /* Hide popup content in run dialog mode */
     .run-dialog-mode .popup-window {
       display: none;
@@ -107,13 +200,17 @@
 <body>
   <!-- Run Dialog Content (shown when URL param exists) -->
   <div id="runDialogContent" style="display: none;">
-    <h3>Previous Parameters</h3>
+    <h3 id="previousParamsTitle">Previous Parameters</h3>
     <textarea id="previousParams" readonly></textarea>
     <h3>Enter Parameters</h3>
     <textarea id="paramsInput"></textarea>
     <div class="button-container">
       <button class="cancel-btn" id="cancelBtn">Cancel</button>
       <button class="run-btn-exec" id="runBtn">Execute</button>
+    </div>
+    <div id="searchSection">
+      <h3>Usage &amp; Result</h3>
+      <div id="searchResult"></div>
     </div>
     <iframe id="hiddenFrame" name="hiddenFrame"></iframe>
   </div>
@@ -140,6 +237,8 @@
     </div>
   </div>
 
+  <script src="job_search.js"></script>
+  <script src="job_remove_history.js"></script>
   <script src="run_dialog.js"></script>
 </body>
 </html>
