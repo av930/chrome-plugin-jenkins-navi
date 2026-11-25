@@ -191,6 +191,51 @@
       color: #000;
     }
 
+    /* job 실행(job) 상태 */
+    #searchResult .job-row {
+      margin-bottom: 2px;
+    }
+
+    #searchResult .job-row a {
+      color: #8ab4f8;
+    }
+
+    #searchResult .st {
+      display: inline-block;
+      min-width: 76px;
+      font-weight: bold;
+      color: #858585;
+    }
+
+    #searchResult .st-QUEUED,
+    #searchResult .st-RUNNING {
+      color: #4fc3f7;
+    }
+
+    #searchResult .st-SUCCESS {
+      color: #4caf50;
+    }
+
+    #searchResult .st-FAILURE,
+    #searchResult .st-ERROR {
+      color: #f44336;
+    }
+
+    #searchResult .st-UNSTABLE,
+    #searchResult .st-ABORTED,
+    #searchResult .st-NOT_BUILT {
+      color: #ff9800;
+    }
+
+    .button-container .stop-btn {
+      background-color: #c62828;
+      color: white;
+    }
+
+    .button-container .stop-btn:hover {
+      background-color: #d32f2f;
+    }
+
     /* Hide popup content in run dialog mode */
     .run-dialog-mode .popup-window {
       display: none;
@@ -205,6 +250,7 @@
     <h3>Enter Parameters</h3>
     <textarea id="paramsInput"></textarea>
     <div class="button-container">
+      <button class="stop-btn" id="stopBtn" style="display: none;">Stop</button>
       <button class="cancel-btn" id="cancelBtn">Cancel</button>
       <button class="run-btn-exec" id="runBtn">Execute</button>
     </div>
@@ -239,6 +285,7 @@
 
   <script src="job_search.js"></script>
   <script src="job_remove_history.js"></script>
+  <script src="job_trigger.js"></script>
   <script src="run_dialog.js"></script>
 </body>
 </html>

@@ -95,5 +95,5 @@ Target="1000~"                   #build 범위 (ex: 27~36|~36|27~|40), 필수
     ui.status(`${ACTION} [${name}] 완료: 삭제 ${deleted}건${failures.length ? `, 실패 ${failures.length}건` : ''}`);
   }
 
-  return { USAGE, isAction, defaultParams, parseParams, run };
+  return { USAGE, isAction, defaultParams, parseParams, run, rootUrl, crumbHeaders };
 })();

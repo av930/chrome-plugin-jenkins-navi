@@ -38,6 +38,8 @@
     "compare": "compare_jobconfig",
     "search": "Config",
     "rmBHist": "RemoveHistory",
+    "trigger": "job",
+    "wide-width": "all",
     "temp_job": "http://jenkins.rge.com/jenkins03/job/ControlJenkins/buildWithParameters?token=plugin"
   }
 }

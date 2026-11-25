@@ -144,7 +144,9 @@ function createButtonsInOrder() {
         handleMenuClick(menuName, menuPath);
       });
     } else if (sectionName === 'run') {
-      createSectionButtons(sectionData, 'run-btn', (runName, runPath) => {
+      // "wide-width"는 버튼이 아니라 화면 폭 설정(wide_width.js)이므로 버튼에서 제외한다
+      const runButtons = Object.fromEntries(Object.entries(sectionData).filter(([name]) => name !== 'wide-width'));
+      createSectionButtons(runButtons, 'run-btn', (runName, runPath) => {
         handleRunClick(runPath, runName);
       }, '▶ ');
     } else if (sectionName === 'job') {

@@ -1,0 +1,28 @@
+/* wide-width: config 'run'의 "wide-width" 설정에 따라 wide_width.js가 html에 class를 붙일 때만 적용된다. */
+
+/* config 화면: 폭 제한 해제 (wide_width.js가 조상 요소의 max-width도 inline으로 해제한다) */
+html.jn-wide-config #main-panel,
+html.jn-wide-config #main-panel > form,
+html.jn-wide-config .jenkins-config,
+html.jn-wide-config .app-page-body,
+html.jn-wide-config .app-page-body--one-column {
+  max-width: none !important;
+}
+
+html.jn-wide-config #main-panel {
+  box-sizing: border-box;
+}
+
+/* Build History: side-panel 안에서 오른쪽(main-panel 위)으로 확장. 폭은 wide_width.js가 계산한다. */
+html.jn-wide-bhistory #buildHistory {
+  position: relative;
+  z-index: 1000;
+  box-sizing: border-box;
+  max-width: none !important;
+  background: #fff;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.25);
+}
+
+html.jn-wide-bhistory .jn-wide-bh-ancestor {
+  overflow: visible !important;
+}

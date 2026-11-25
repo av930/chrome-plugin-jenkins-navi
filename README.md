@@ -90,6 +90,37 @@ Target="1000~"          #build 범위 (ex: 27~36|~36|27~|40), 필수
 - Execute 하면 삭제 대상 개수와 범위를 보여주고 확인(confirm) 후 삭제한다. 삭제는 되돌릴 수 없다.
 - 각 build에 `POST <build>/doDelete`를 보내며 CSRF crumb은 `crumbIssuer`에서 받아 붙인다. 실패한 build는 error로 표시한다.
 
+## Job 실행 (job)
+
+config의 `run` 섹션에서 값이 `job`인 버튼(예: `"trigger": "job"`)을 누르면 job 실행 창이 뜬다. Enter Parameters에 job URL을 shell 연산자로 엮어 쓰면 순차/병렬로 실행하고 각 build의 완료 결과를 `Usage & Result`에 실시간으로 표시한다. 입력은 Execute 시 저장되어 다음에 복원된다.
+
+```
+http://host/job/build_A/ BRANCH=main && http://host/job/test_A/
+( http://host/job/test_1/ & http://host/job/test_2/ ) && http://host/job/deploy/
+```
+
+- job은 full URL(`http(s)://…/job/<name>/`)이다. 서버가 달라도 된다. 뒤에 `KEY=VALUE`로 build parameter를 주며, 값에 공백이 있으면 `KEY="a b"`. parameter가 있는 job은 `buildWithParameters`, 없는 job은 `build`로 실행한다.
+- `a ; b`(줄바꿈 포함) 순차, `a && b` a 성공 시에만 b, `a || b` a 실패 시에만 b, `a & b` 동시 실행, `( … )` 그룹. `&&` `||`가 `;` `&`보다 먼저 묶이므로 `a & b && c`는 `a & (b && c)`이다. "a, b 모두 성공 후 c"는 `( a & b ) && c`로 쓴다.
+- 그룹과 식 끝에서는 `&`로 시작한 job을 모두 기다린다. 그룹은 안의 문장이 모두 성공해야 성공이다.
+- 성공은 build result가 `SUCCESS`일 때뿐이다. `UNSTABLE`, `FAILURE`, `ABORTED`는 실패이고, 실행 불가(job 없음/disabled/요청 실패)는 `ERROR`로 표시하며 실패로 본다.
+- 연산자는 공백으로 띄워 쓴다. 단어 끝에 붙은 `;` `&` `&&` `||` `)`와 앞에 붙은 `(`도 연산자로 인식하고, URL 안의 `&`는 URL로 취급한다. `#` 로 시작하는 단어부터 줄 끝은 주석이다.
+- Execute 하면 바로 실행한다. 문법 오류는 실행 전에 위치(줄)와 함께 표시한다.
+- `Stop`(또는 실행 중 `Cancel`)은 실행 예정 job은 시작하지 않고, queue 대기 job은 `queue/cancelItem`, 실행 중 build는 `<build>/stop`으로 모두 중단한다.
+- 실행을 조율하는 쪽은 이 창이다. 창을 닫으면(`Cancel` 외의 방법) 이후 job이 스케줄되지 않는다.
+
+## 화면 폭 확장 (wide-width)
+
+config의 `run` 섹션에 `"wide-width"`를 넣으면 `▶ wide-width` 버튼이 생기고, Jenkins 화면 폭을 넓힐 수 있다. 값은 **기본으로 확장할 카테고리**이다(대소문자 무시).
+
+| 값 | 기본 확장 |
+|---|---|
+| `config` | `…/configure` 화면(job/folder/view/node)을 화면 폭 전체로 확장 |
+| `Bhistory` | 왼쪽 하단 Build History(`#buildHistory`)를 오른쪽 끝까지 확장 (main-panel 위에 겹쳐 표시) |
+| `all` | 둘 다 |
+
+버튼을 누르면 **현재 보이는 화면에 해당하는 카테고리**(configure 화면 → `config`, `#buildHistory`가 있는 화면 → `Bhistory`)를 확장/축소로 토글한다. 해당 항목이 없는 화면이면 안내 메시지만 표시한다.
+토글한 상태는 카테고리별로 저장되어 모든 job/화면에 동일하게 적용된다. 저장된 상태가 없으면 위 기본값을 따른다. 다른 탭은 즉시 반영되고, 새로 여는 화면은 로드 시 적용된다.
+
 ## 파일 구조
 
 - `manifest.json` - Extension 설정 파일

@@ -36,10 +36,12 @@
       ],
       "js": [
         "help.js",
-        "jenkins-shortcuts.js"
+        "jenkins-shortcuts.js",
+        "wide_width.js"
       ],
       "css": [
-        "jenkins-shortcuts.css"
+        "jenkins-shortcuts.css",
+        "wide_width.css"
       ],
       "run_at": "document_idle"
     }

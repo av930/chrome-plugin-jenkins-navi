@@ -284,6 +284,12 @@ function createSectionButtons(sectionData, className, sectionName, clickHandler,
     button.className = `action-btn ${className}`;
     button.dataset.action = name;
     button.textContent = prefix + name;
+    // run."wide-width": 값은 기본 확장 카테고리(wide_width.js). 버튼은 현재 화면의 확장/축소를 토글한다.
+    if (sectionName === 'run' && name === 'wide-width') {
+      button.addEventListener('click', toggleWideWidth);
+      buttonGrid.appendChild(button);
+      continue;
+    }
     addButtonClickHandlers(button, async (openInNewTab) => {
       const value = Array.isArray(pathOrArray)
         ? await getNextArrayValue(sectionName, name, pathOrArray)
@@ -462,6 +468,19 @@ async function handleRunClick(runUrl, buttonName, openInNewTab = false) {
     top: 200
   });
 
+  window.close();
+}
+
+// wide-width 버튼: 현재 탭(configure / Build History 화면)의 폭 확장/축소를 토글한다 (wide_width.js)
+async function toggleWideWidth() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tabs && tabs.length > 0) {
+    try {
+      await chrome.tabs.sendMessage(tabs[0].id, { type: 'toggleWideWidth' });
+    } catch (error) {
+      console.error('Failed to toggle wide width:', error.message);
+    }
+  }
   window.close();
 }
 
@@ -714,9 +733,9 @@ async function initializeRunDialog() {
   });
 }
 
-// run 값(Config/Log/Name | RemoveHistory)에 해당하는 action module (없으면 null)
+// run 값(Config/Log/Name | RemoveHistory | job)에 해당하는 action module (없으면 null)
 function findActionModule(value) {
-  return [JobSearch, JobRemoveHistory].find(m => m.isAction(value)) || null;
+  return [JobSearch, JobRemoveHistory, JobTrigger].find(m => m.isAction(value)) || null;
 }
 
 // Initialize search dialog (run 값이 Config/Log/Name인 경우)
@@ -756,6 +775,10 @@ async function initializeSearchDialog() {
     await chrome.tabs.create({ windowId: targetWindow.id, url: link.href, active: true });
   });
 
+  const stopBtn = document.getElementById('stopBtn');
+  let controller = null; // 실행 중인 작업의 AbortController (없으면 null)
+  let running = null;
+
   runBtn.addEventListener('click', async () => {
     await chrome.storage.local.set({ [storageKey]: textarea.value });
     const params = actionModule.parseParams(textarea.value);
@@ -763,13 +786,24 @@ async function initializeSearchDialog() {
     const status = result.querySelector('.status');
     const hits = result.querySelector('.hits');
     const errors = result.querySelector('.errors');
+    controller = new AbortController();
     const ui = {
+      signal: controller.signal,
       status: (text) => { status.textContent = text; },
       info: (text) => {
         errors.insertAdjacentHTML('beforeend', `<div class="status">${JobSearch.escapeHtml(text)}</div>`);
       },
       confirm: (text) => window.confirm(text),
       hit: (html) => { hits.insertAdjacentHTML('beforeend', html); expandIfOverflow(); },
+      // 나중에 내용을 바꿀 수 있는 한 줄 (job 실행 상태 표시용)
+      line: (html) => {
+        const el = document.createElement('div');
+        el.className = 'job-row';
+        el.innerHTML = html;
+        hits.appendChild(el);
+        expandIfOverflow();
+        return { set: (newHtml) => { el.innerHTML = newHtml; } };
+      },
       error: (text) => {
         errors.insertAdjacentHTML('beforeend', `<div class="error">${JobSearch.escapeHtml(text)}</div>`);
         expandIfOverflow();
@@ -777,17 +811,35 @@ async function initializeSearchDialog() {
     };
 
     runBtn.disabled = true;
-    try {
-      await actionModule.run(params, pageUrl, ui);
-    } catch (error) {
-      console.error('Search failed:', error);
-      ui.error(error.message);
-    } finally {
-      runBtn.disabled = false;
-    }
+    stopBtn.style.display = actionModule.STOPPABLE ? '' : 'none';
+    running = (async () => {
+      try {
+        await actionModule.run(params, pageUrl, ui);
+      } catch (error) {
+        console.error('Search failed:', error);
+        ui.error(error.message);
+      }
+    })();
+    await running;
+    stopBtn.style.display = 'none';
+    stopBtn.disabled = false;
+    runBtn.disabled = false;
+    controller = null;
+    running = null;
   });
 
-  document.getElementById('cancelBtn').addEventListener('click', () => {
+  stopBtn.addEventListener('click', () => {
+    if (!controller) return;
+    stopBtn.disabled = true;
+    controller.abort();
+  });
+
+  // 중단 가능한 작업이 실행 중이면 먼저 중단(실행 예정/queue/실행 중 job)한 뒤 닫는다
+  document.getElementById('cancelBtn').addEventListener('click', async () => {
+    if (controller && actionModule.STOPPABLE) {
+      controller.abort();
+      await running;
+    }
     window.close();
   });
 
