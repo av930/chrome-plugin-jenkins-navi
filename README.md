@@ -102,6 +102,7 @@ http://host/job/build_A/ BRANCH=main && http://host/job/test_A/
 - job은 full URL(`http(s)://…/job/<name>/`)이다. 서버가 달라도 된다. 뒤에 `KEY=VALUE`로 build parameter를 주며, 값에 공백이 있으면 `KEY="a b"`. parameter가 있는 job은 `buildWithParameters`, 없는 job은 `build`로 실행한다.
 - `a ; b`(줄바꿈 포함) 순차, `a && b` a 성공 시에만 b, `a || b` a 실패 시에만 b, `a & b` 동시 실행, `( … )` 그룹. `&&` `||`가 `;` `&`보다 먼저 묶이므로 `a & b && c`는 `a & (b && c)`이다. "a, b 모두 성공 후 c"는 `( a & b ) && c`로 쓴다.
 - 그룹과 식 끝에서는 `&`로 시작한 job을 모두 기다린다. 그룹은 안의 문장이 모두 성공해야 성공이다.
+- `sleep N`: N분 대기하는 항으로, job과 똑같이 연산자로 엮는다 (소수 가능, 항상 성공, 대기 중에는 남은 시간 표시). `a && sleep 10 && b`는 a 성공 10분 뒤 b, `a ; sleep 20 ; b`는 a가 끝나고 20분 뒤 b(성공 여부 무관), `a & ( sleep 10 && b )`는 a를 시작하고 10분 뒤 b를 시작한다(a는 기다리지 않음). `Stop`은 대기 중인 `sleep`도 즉시 중단한다.
 - 성공은 build result가 `SUCCESS`일 때뿐이다. `UNSTABLE`, `FAILURE`, `ABORTED`는 실패이고, 실행 불가(job 없음/disabled/요청 실패)는 `ERROR`로 표시하며 실패로 본다.
 - 연산자는 공백으로 띄워 쓴다. 단어 끝에 붙은 `;` `&` `&&` `||` `)`와 앞에 붙은 `(`도 연산자로 인식하고, URL 안의 `&`는 URL로 취급한다. `#` 로 시작하는 단어부터 줄 끝은 주석이다.
 - Execute 하면 바로 실행한다. 문법 오류는 실행 전에 위치(줄)와 함께 표시한다.

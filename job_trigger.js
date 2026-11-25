@@ -10,6 +10,7 @@ const JobTrigger = (() => {
 
   const USAGE = `http://host/job/build_A/ BRANCH=main && http://host/job/test_A/
 ( http://host/job/test_1/ & http://host/job/test_2/ ) && http://host/job/deploy/
+http://host/job/a/ && sleep 10 && http://host/job/b/
 
 # job은 full URL(http(s)://…/job/<name>/)로 쓰고, 뒤에 KEY=VALUE로 build parameter를 준다. (값에 공백이 있으면 KEY="a b")
 # a ; b (줄바꿈 포함)   a가 끝난 뒤 b
@@ -17,6 +18,7 @@ const JobTrigger = (() => {
 # a || b                 a가 실패했을 때만 b
 # a & b                  a, b 동시 실행 (a는 기다리지 않고 시작)
 # ( … )                  그룹. 그룹 안의 병렬 job이 모두 끝나야 그룹이 끝나고, 안의 문장이 모두 성공해야 성공
+# sleep N                N분 대기 (소수 가능, 항상 성공). a && sleep 10 && b | a ; sleep 20 ; b | a & ( sleep 10 && b )
 # && || 가 ; & 보다 먼저 묶인다: a & b && c = a & (b && c). "a, b 모두 성공 후 c"는 ( a & b ) && c
 # 연산자는 공백으로 띄워 쓴다. 단어 끝에 붙은 ; & && || ) 와 앞에 붙은 ( 도 연산자로 본다. (URL 안의 & 는 URL 그대로)
 # Execute 하면 바로 실행한다. UNSTABLE은 실패로 본다.
@@ -161,6 +163,14 @@ const JobTrigger = (() => {
       }
       if (t.type === 'op') fail(t, `"${t.value}" 앞에 job이 없습니다`);
       pos++;
+      if (t.value.toLowerCase() === 'sleep') {
+        const n = peek();
+        if (!n || n.type !== 'word' || !/^(\d+(\.\d*)?|\.\d+)$/.test(n.value)) {
+          fail(n || t, 'sleep 뒤에는 분 단위 숫자가 필요합니다 (ex: sleep 10, sleep 0.5)');
+        }
+        pos++;
+        return { type: 'sleep', minutes: Number(n.value) };
+      }
       return parseJob(t);
     }
 
@@ -196,7 +206,7 @@ const JobTrigger = (() => {
   }
 
   function collectJobs(node, out = []) {
-    if (node.type === 'job') out.push(node);
+    if (node.type === 'job' || node.type === 'sleep') out.push(node);
     else if (node.type === 'group') collectJobs(node.body, out);
     else if (node.type === 'list') node.items.forEach(item => collectJobs(item.node, out));
     else { collectJobs(node.left, out); collectJobs(node.right, out); }
@@ -304,6 +314,31 @@ const JobTrigger = (() => {
     }
   }
 
+  const formatRemaining = (ms) => {
+    const s = Math.ceil(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  // sleep N: N분 대기 후 성공. 종료 시각 기준으로 계산한다 (창이 가려져 timer가 늦어져도 어긋나지 않음)
+  async function runSleep(step, ctx) {
+    const { signal } = ctx;
+    if (signal.aborted) {
+      ctx.set(step, 'ABORTED');
+      return false;
+    }
+    const endAt = Date.now() + step.minutes * 60000;
+    for (let left = endAt - Date.now(); left > 0; left = endAt - Date.now()) {
+      ctx.set(step, 'WAITING', `남은 시간 ${formatRemaining(left)}`);
+      await sleep(Math.min(1000, left), signal);
+      if (signal.aborted) {
+        ctx.set(step, 'ABORTED');
+        return false;
+      }
+    }
+    ctx.set(step, 'SUCCESS');
+    return true;
+  }
+
   // 실행되지 않는 하위 job을 SKIPPED(중단 중이면 ABORTED)로 표시
   function markNotRun(node, ctx) {
     for (const job of collectJobs(node)) {
@@ -317,6 +352,8 @@ const JobTrigger = (() => {
     switch (node.type) {
       case 'job':
         return runJob(node, ctx);
+      case 'sleep':
+        return runSleep(node, ctx);
       case 'group':
         return evaluate(node.body, ctx);
       case 'and':
@@ -348,6 +385,10 @@ const JobTrigger = (() => {
 
   function rowHtml(job) {
     const esc = JobSearch.escapeHtml;
+    if (job.type === 'sleep') {
+      return `<span class="st st-${esc(job.status)}">${esc(job.status)}</span> sleep ${job.minutes}분` +
+        (job.message ? ` <span class="line-no">${esc(job.message)}</span>` : '');
+    }
     const link = job.build
       ? `<a href="${esc(job.build.url)}">${esc(job.label)} #${job.build.number}</a>`
       : `<a href="${esc(job.url)}">${esc(job.label)}</a>`;
@@ -375,17 +416,17 @@ const JobTrigger = (() => {
       set(job, status, message = '', build = job.build) {
         Object.assign(job, { status, message, build });
         job.row.set(rowHtml(job));
-        ui.status(`${ui.signal.aborted ? '중단 중' : '실행 중'} (job ${jobs.length}개): ${counts()}`);
+        ui.status(`${ui.signal.aborted ? '중단 중' : '실행 중'} (${jobs.length}단계): ${counts()}`);
       }
     };
     for (const job of jobs) {
       Object.assign(job, { status: 'PENDING', message: '', build: null });
       job.row = ui.line(rowHtml(job));
     }
-    ui.status(`실행 시작 (job ${jobs.length}개)`);
+    ui.status(`실행 시작 (${jobs.length}단계)`);
 
     const ok = await evaluate(root, ctx);
-    ui.status(`${ok ? '성공' : '실패'}${ui.signal.aborted ? ' (중단됨)' : ''} (job ${jobs.length}개): ${counts()}`);
+    ui.status(`${ok ? '성공' : '실패'}${ui.signal.aborted ? ' (중단됨)' : ''} (${jobs.length}단계): ${counts()}`);
   }
 
   return { USAGE, STOPPABLE, isAction, defaultParams, parseParams, run };
