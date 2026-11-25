@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Jenkins Navigator",
-  "version": "3.3",
+  "version": "3.4",
   "description": "Quick navigation to Jenkins and other tools",
   "action": {
     "default_popup": "run_dialog.html",
@@ -51,5 +51,5 @@
     "48": "icon48.png",
     "128": "icon128.png"
   },
-  "version_name": "261123_3c06"
+  "version_name": "261125_277f"
 }
